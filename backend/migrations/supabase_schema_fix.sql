@@ -1,6 +1,9 @@
 -- Supabase/Postgres migration for the ChatBot backend
--- This script aligns the live database schema with the SQLAlchemy ORM and the runtime expectations.
--- Run it against the target Supabase/Postgres database using psql or the Supabase SQL editor.
+-- This script aligns the live database schema with the SQLAlchemy ORM.
+-- All identifiers are NATIVE UUID columns (matching the ORM models in
+-- app/infrastructure/db/models/*), so the app and the DB agree on types.
+-- Run it against the target Supabase/Postgres database using psql or the
+-- Supabase SQL editor. Safe to re-run (idempotent).
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -12,9 +15,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Helper: convert a legacy varchar(36) id column to native UUID if needed.
+-- (Kept for databases that were first created with varchar(36) columns.)
+
 -- Applications table
 CREATE TABLE IF NOT EXISTS public.applications (
-    id varchar(36) PRIMARY KEY,
+    id UUID PRIMARY KEY,
     name varchar(150) NOT NULL UNIQUE,
     slug varchar(150) NOT NULL UNIQUE,
     description text,
@@ -24,6 +30,18 @@ CREATE TABLE IF NOT EXISTS public.applications (
     created_at timestamptz NOT NULL DEFAULT NOW(),
     updated_at timestamptz NOT NULL DEFAULT NOW()
 );
+
+DO $$
+BEGIN
+    -- Legacy column-type repair: convert varchar(36) ids to UUID.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'applications'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.applications ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+END $$;
 
 ALTER TABLE public.applications
     ADD COLUMN IF NOT EXISTS description text,
@@ -72,8 +90,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Knowledge bases table
 CREATE TABLE IF NOT EXISTS public.knowledge_bases (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL UNIQUE,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL UNIQUE,
     name varchar(150) NOT NULL,
     slug varchar(180) NOT NULL UNIQUE,
     status varchar(50) NOT NULL DEFAULT 'ready',
@@ -84,8 +102,25 @@ CREATE TABLE IF NOT EXISTS public.knowledge_bases (
         FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'knowledge_bases'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.knowledge_bases ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'knowledge_bases'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.knowledge_bases ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.knowledge_bases
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
     ADD COLUMN IF NOT EXISTS name varchar(150),
     ADD COLUMN IF NOT EXISTS slug varchar(180),
     ADD COLUMN IF NOT EXISTS status varchar(50) DEFAULT 'ready',
@@ -114,9 +149,9 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Documents table
 CREATE TABLE IF NOT EXISTS public.documents (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL,
-    knowledge_base_id varchar(36) NOT NULL,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL,
+    knowledge_base_id UUID NOT NULL,
     title varchar(255) NOT NULL,
     description text,
     source_type varchar(50) NOT NULL,
@@ -133,9 +168,32 @@ CREATE TABLE IF NOT EXISTS public.documents (
     CONSTRAINT fk_documents_knowledge_base FOREIGN KEY (knowledge_base_id) REFERENCES public.knowledge_bases(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'documents'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.documents ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'documents'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.documents ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'documents'
+          AND column_name = 'knowledge_base_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.documents ALTER COLUMN knowledge_base_id TYPE UUID USING knowledge_base_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.documents
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
-    ADD COLUMN IF NOT EXISTS knowledge_base_id varchar(36),
     ADD COLUMN IF NOT EXISTS title varchar(255),
     ADD COLUMN IF NOT EXISTS description text,
     ADD COLUMN IF NOT EXISTS source_type varchar(50),
@@ -170,8 +228,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Conversations table
 CREATE TABLE IF NOT EXISTS public.conversations (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL,
     conversation_identity varchar(255) NOT NULL,
     title varchar(255),
     summary text,
@@ -181,8 +239,25 @@ CREATE TABLE IF NOT EXISTS public.conversations (
     CONSTRAINT fk_conversations_application FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'conversations'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.conversations ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'conversations'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.conversations ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.conversations
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
     ADD COLUMN IF NOT EXISTS conversation_identity varchar(255),
     ADD COLUMN IF NOT EXISTS title varchar(255),
     ADD COLUMN IF NOT EXISTS summary text,
@@ -208,8 +283,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Messages table
 CREATE TABLE IF NOT EXISTS public.messages (
-    id varchar(36) PRIMARY KEY,
-    conversation_id varchar(36) NOT NULL,
+    id UUID PRIMARY KEY,
+    conversation_id UUID NOT NULL,
     role varchar(50) NOT NULL,
     content text NOT NULL,
     sequence_number integer NOT NULL,
@@ -220,8 +295,25 @@ CREATE TABLE IF NOT EXISTS public.messages (
     CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES public.conversations(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'messages'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.messages ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'messages'
+          AND column_name = 'conversation_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.messages ALTER COLUMN conversation_id TYPE UUID USING conversation_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.messages
-    ADD COLUMN IF NOT EXISTS conversation_id varchar(36),
     ADD COLUMN IF NOT EXISTS role varchar(50),
     ADD COLUMN IF NOT EXISTS content text,
     ADD COLUMN IF NOT EXISTS sequence_number integer,
@@ -249,8 +341,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Api keys table
 CREATE TABLE IF NOT EXISTS public.api_keys (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL,
     name varchar(120) NOT NULL,
     key_prefix varchar(32) NOT NULL,
     key_hash text NOT NULL,
@@ -260,8 +352,25 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
     CONSTRAINT fk_api_keys_application FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'api_keys'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.api_keys ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'api_keys'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.api_keys ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.api_keys
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
     ADD COLUMN IF NOT EXISTS name varchar(120),
     ADD COLUMN IF NOT EXISTS key_prefix varchar(32),
     ADD COLUMN IF NOT EXISTS key_hash text,
@@ -289,8 +398,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Application settings table
 CREATE TABLE IF NOT EXISTS public.application_settings (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL UNIQUE,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL UNIQUE,
     llm_temperature varchar(20) NOT NULL DEFAULT '0.2',
     max_context_messages integer NOT NULL DEFAULT 12,
     inactivity_timeout_minutes integer NOT NULL DEFAULT 30,
@@ -302,8 +411,25 @@ CREATE TABLE IF NOT EXISTS public.application_settings (
         FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'application_settings'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.application_settings ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'application_settings'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.application_settings ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.application_settings
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
     ADD COLUMN IF NOT EXISTS llm_temperature varchar(20) DEFAULT '0.2',
     ADD COLUMN IF NOT EXISTS max_context_messages integer DEFAULT 12,
     ADD COLUMN IF NOT EXISTS inactivity_timeout_minutes integer DEFAULT 30,
@@ -330,8 +456,8 @@ EXECUTE FUNCTION set_updated_at();
 
 -- Widgets table
 CREATE TABLE IF NOT EXISTS public.widgets (
-    id varchar(36) PRIMARY KEY,
-    application_id varchar(36) NOT NULL,
+    id UUID PRIMARY KEY,
+    application_id UUID NOT NULL,
     display_name varchar(150) NOT NULL,
     public_key varchar(150) UNIQUE,
     theme varchar(50) NOT NULL DEFAULT 'light',
@@ -344,8 +470,25 @@ CREATE TABLE IF NOT EXISTS public.widgets (
     CONSTRAINT fk_widgets_application FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'widgets'
+          AND column_name = 'id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.widgets ALTER COLUMN id TYPE UUID USING id::uuid;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'widgets'
+          AND column_name = 'application_id' AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE public.widgets ALTER COLUMN application_id TYPE UUID USING application_id::uuid;
+    END IF;
+END $$;
+
 ALTER TABLE public.widgets
-    ADD COLUMN IF NOT EXISTS application_id varchar(36),
     ADD COLUMN IF NOT EXISTS display_name varchar(150),
     ADD COLUMN IF NOT EXISTS public_key varchar(150),
     ADD COLUMN IF NOT EXISTS theme varchar(50) DEFAULT 'light',
@@ -373,7 +516,10 @@ BEFORE UPDATE ON public.widgets
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
--- Vector store table used by the ingestion pipeline
+-- Vector store table used by the ingestion pipeline.
+-- NOTE: the embedding dimension must match VECTOR_STORE_DIMENSION in the
+-- backend .env (1024 for qwen3-embedding-8b, 768 for nomic-embed-text).
+-- If you change the dimension, drop and recreate this table.
 CREATE TABLE IF NOT EXISTS public.document_chunks (
     chunk_id text PRIMARY KEY,
     knowledge_base_id text NOT NULL,

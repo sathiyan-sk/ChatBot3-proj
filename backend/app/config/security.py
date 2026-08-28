@@ -1,6 +1,24 @@
 from __future__ import annotations
 
-from app.config.settings import SecuritySettings
+import os
+from dataclasses import dataclass
+
+
+@dataclass(slots=True, frozen=True)
+class SecuritySettings:
+    admin_username: str
+    admin_password: str
+    api_key_header_name: str
+    request_id_header_name: str
+
+
+def load_security_settings() -> SecuritySettings:
+    return SecuritySettings(
+        admin_username=os.getenv("ADMIN_USERNAME", "admin"),
+        admin_password=os.getenv("ADMIN_PASSWORD", "change-this-password"),
+        api_key_header_name=os.getenv("API_KEY_HEADER_NAME", "X-API-Key"),
+        request_id_header_name=os.getenv("REQUEST_ID_HEADER_NAME", "X-Request-ID"),
+    )
 
 
 def validate_security_settings(settings: SecuritySettings) -> None:
@@ -18,4 +36,3 @@ def validate_security_settings(settings: SecuritySettings) -> None:
 
     if not settings.request_id_header_name.strip():
         raise ValueError("REQUEST_ID_HEADER_NAME must not be empty.")
-    

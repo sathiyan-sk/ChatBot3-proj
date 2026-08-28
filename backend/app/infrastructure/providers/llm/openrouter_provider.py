@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -11,6 +11,7 @@ from app.knowledge_engine.domain.provider_interfaces import LlmProvider
 @dataclass(slots=True)
 class OpenRouterLlmProvider(LlmProvider):
     settings: object
+    fallback_models: tuple[str, ...] = field(default_factory=tuple)
 
     def generate(
         self,
@@ -42,11 +43,26 @@ class OpenRouterLlmProvider(LlmProvider):
             "https://openrouter.ai/api/v1",
         ).rstrip("/")
 
-        model = getattr(
+        primary_model = getattr(
             self.settings,
             "model",
-            "google/gemma-4-26b-a4b-it:free",
+            "",
         )
+
+        # Primary model first, then any configured fallbacks. Free-tier
+        # models are frequently rate-limited upstream, so falling back to
+        # alternates keeps chat working instead of returning 502.
+        models: list[str] = []
+        if primary_model:
+            models.append(primary_model)
+        models.extend(self.fallback_models)
+
+        if not models:
+            raise ApplicationError(
+                message="OpenRouter model is not configured.",
+                code="openrouter_model_missing",
+                status_code=500,
+            )
 
         temperature = float(
             getattr(
@@ -60,13 +76,6 @@ class OpenRouterLlmProvider(LlmProvider):
         if normalized_system:
             messages.append({"role": "system", "content": normalized_system})
         messages.append({"role": "user", "content": normalized_user})
-
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False,
-        }
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -83,39 +92,56 @@ class OpenRouterLlmProvider(LlmProvider):
             )
         )
 
-        try:
-            response = httpx.post(
-                f"{base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=timeout,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise ApplicationError(
-                message="OpenRouter LLM provider request failed.",
-                code="openrouter_provider_failed",
-                status_code=502,
-            ) from exc
+        last_error: str = "no models attempted"
 
-        try:
-            response_payload = response.json()
-            generated_text = (
-                response_payload["choices"][0]
-                ["message"]["content"]
-            )
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise ApplicationError(
-                message="OpenRouter provider returned an invalid response.",
-                code="openrouter_provider_invalid_response",
-                status_code=502,
-            ) from exc
+        for model in models:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": False,
+            }
 
-        if not isinstance(generated_text, str) or not generated_text.strip():
-            raise ApplicationError(
-                message="OpenRouter provider returned empty response text.",
-                code="openrouter_provider_empty_response",
-                status_code=502,
+            try:
+                response = httpx.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            except httpx.HTTPError as exc:
+                last_error = f"{model}: network error ({exc})"
+                continue
+
+            if response.status_code == 200:
+                try:
+                    response_payload = response.json()
+                    generated_text = (
+                        response_payload["choices"][0]
+                        ["message"]["content"]
+                    )
+                except (KeyError, IndexError, TypeError, ValueError) as exc:
+                    last_error = f"{model}: invalid response shape"
+                    continue
+
+                if isinstance(generated_text, str) and generated_text.strip():
+                    return generated_text.strip()
+
+                last_error = f"{model}: empty response text"
+                continue
+
+            # 429 (rate limited), 404 (model gone), 5xx (provider issue)
+            # are all worth retrying with the next fallback model.
+            last_error = (
+                f"{model}: HTTP {response.status_code} "
+                f"{response.text[:200]}"
             )
 
-        return generated_text.strip()
+        raise ApplicationError(
+            message=(
+                "OpenRouter LLM provider request failed. "
+                f"Tried models: {last_error}"
+            ),
+            code="openrouter_provider_failed",
+            status_code=502,
+        )

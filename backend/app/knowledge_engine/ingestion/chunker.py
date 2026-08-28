@@ -39,7 +39,7 @@ class IntelligentChunkGenerator:
             return []  # Return empty list if no text to chunk
 
         # Extract optional metadata from kwargs
-        document_id = kwargs.get("document_id") or kwargs.get("document")
+        document_id = kwargs.get("document_id")
         metadata = kwargs.get("metadata", {})
 
         # Split into sentences
@@ -59,9 +59,16 @@ class IntelligentChunkGenerator:
                     if document_id:
                         chunk_metadata["document_id"] = str(document_id)
 
+                    # Chunk IDs must be globally unique: the vector store uses
+                    # chunk_id as PRIMARY KEY, so bare "chunk-0" style IDs from
+                    # different documents would overwrite each other.
+                    chunk_id_prefix = (
+                        f"{document_id}-" if document_id else ""
+                    )
+
                     chunks.append(
                         DocumentChunk(
-                            chunk_id=f"chunk-{current_chunk_index}",
+                            chunk_id=f"{chunk_id_prefix}chunk-{current_chunk_index}",
                             content=current_chunk_text.strip(),
                             metadata=chunk_metadata,
                         )
@@ -78,9 +85,13 @@ class IntelligentChunkGenerator:
             if document_id:
                 chunk_metadata["document_id"] = str(document_id)
 
+            chunk_id_prefix = (
+                f"{document_id}-" if document_id else ""
+            )
+
             chunks.append(
                 DocumentChunk(
-                    chunk_id=f"chunk-{current_chunk_index}",
+                    chunk_id=f"{chunk_id_prefix}chunk-{current_chunk_index}",
                     content=current_chunk_text.strip(),
                     metadata=chunk_metadata,
                 )

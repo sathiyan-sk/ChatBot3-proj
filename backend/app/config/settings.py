@@ -18,6 +18,11 @@ class AppSettings:
 @dataclass(slots=True, frozen=True)
 class DatabaseSettings:
     url: str
+    database_echo: bool = False
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_pool_timeout: float = 30.0
+    database_pool_recycle: int = 1800
 
 
 @dataclass(slots=True, frozen=True)
@@ -44,6 +49,7 @@ class OpenRouterSettings:
     provider_timeout_seconds: float
     embedding_model: str
     embedding_dimensions: int
+    fallback_models: tuple[str, ...] = ()
 
 @dataclass(slots=True, frozen=True)
 class ProviderSettings:
@@ -117,6 +123,35 @@ def load_settings() -> Settings:
             url=os.getenv(
                 "DATABASE_URL",
                 "postgresql+psycopg2://postgres:postgres@localhost:5432/postgres",
+            ),
+            database_echo=os.getenv(
+                "DATABASE_ECHO",
+                "false",
+            ).strip().lower()
+            in {"1", "true", "yes"},
+            database_pool_size=int(
+                os.getenv(
+                    "DATABASE_POOL_SIZE",
+                    "5",
+                )
+            ),
+            database_max_overflow=int(
+                os.getenv(
+                    "DATABASE_MAX_OVERFLOW",
+                    "10",
+                )
+            ),
+            database_pool_timeout=float(
+                os.getenv(
+                    "DATABASE_POOL_TIMEOUT",
+                    "30",
+                )
+            ),
+            database_pool_recycle=int(
+                os.getenv(
+                    "DATABASE_POOL_RECYCLE",
+                    "1800",
+                )
             ),
         ),
         providers=ProviderSettings(
@@ -200,6 +235,14 @@ def load_settings() -> Settings:
                     "OPENROUTER_EMBEDDING_DIMENSIONS",
                     "1024",
                 )
+            ),
+            fallback_models=tuple(
+                item.strip()
+                for item in os.getenv(
+                    "OPENROUTER_FALLBACK_MODELS",
+                    "",
+                ).split(",")
+                if item.strip()
             ),
         ),
         vector_store_table_name=os.getenv(

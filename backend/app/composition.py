@@ -28,7 +28,10 @@ from app.knowledge_engine.pipelines.question_answering_pipeline import QuestionA
 
 def _select_llm_provider(settings: Settings):
     if settings.providers.llm.strip().lower() == "openrouter":
-        return OpenRouterLlmProvider(settings=settings.openrouter)
+        return OpenRouterLlmProvider(
+            settings=settings.openrouter,
+            fallback_models=settings.openrouter.fallback_models,
+        )
     return OllamaLlmProvider(settings=settings.ollama)
 
 

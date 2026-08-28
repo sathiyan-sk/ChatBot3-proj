@@ -8,15 +8,18 @@ from fastapi import (
     Depends,
     File,
     Form,
+    HTTPException,
     Query,
+    Request,
+    Response,
     UploadFile,
     status,
 )
-from app.api.admin.ingestion import (
-    run_document_ingestion_task,
-)
+
+from app.api.admin.ingestion import run_document_ingestion_task
 from app.api.dependencies import (
     get_document_application_service,
+    get_settings,
     require_admin,
 )
 from app.api.schemas.documents import (
@@ -25,9 +28,12 @@ from app.api.schemas.documents import (
     MarkDocumentFailedRequest,
     UpdateDocumentRequest,
 )
+from app.config.settings import Settings
+from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
 from app.modules.documents.application.commands import (
     ArchiveDocumentCommand,
     CreateDocumentCommand,
+    DeleteDocumentCommand,
     MarkDocumentFailedCommand,
     MarkDocumentProcessingCommand,
     MarkDocumentReadyCommand,
@@ -70,7 +76,7 @@ def upload_document(
     content = file.file.read()
 
     result = service.upload(
-        knowledge_base_id=knowledge_base_id,
+        knowledge_base_id=(knowledge_base_id),
         title=title,
         description=description,
         filename=file.filename or "uploaded-file",
@@ -103,13 +109,11 @@ def create_document(
 ) -> DocumentResponse:
     result = service.create(
         CreateDocumentCommand(
-            knowledge_base_id=(
-                request.knowledge_base_id
-            ),
+            knowledge_base_id=str(request.knowledge_base_id),
             title=request.title,
             description=request.description,
             source_type=request.source_type,
-            source_uri=request.source_uri,
+            source_uri=request.source_uri or "",
         )
     )
 
@@ -123,6 +127,7 @@ def create_document(
         from_attributes=True,
     )
 
+
 @router.get(
     "/{document_id}",
     response_model=DocumentResponse,
@@ -135,7 +140,7 @@ def get_document_by_id(
 ) -> DocumentResponse:
     result = service.get_by_id(
         GetDocumentByIdQuery(
-            document_id=document_id,
+            document_id=str(document_id),
         )
     )
 
@@ -150,13 +155,8 @@ def get_document_by_id(
     response_model=list[DocumentResponse],
 )
 def list_documents(
-    knowledge_base_id: UUID | None = Query(
-        default=None,
-    ),
-    status_value: str | None = Query(
-        default=None,
-        alias="status",
-    ),
+    knowledge_base_id: UUID | None = Query(None),
+    status_value: str | None = Query(None, alias="status"),
     service: DocumentApplicationService = Depends(
         get_document_application_service,
     ),
@@ -164,7 +164,7 @@ def list_documents(
     if knowledge_base_id is not None:
         results = service.list_by_knowledge_base(
             ListDocumentsByKnowledgeBaseQuery(
-                knowledge_base_id=knowledge_base_id,
+                knowledge_base_id=str(knowledge_base_id),
                 status=status_value,
             )
         )
@@ -201,7 +201,7 @@ def update_document(
 ) -> DocumentResponse:
     result = service.update(
         UpdateDocumentCommand(
-            document_id=document_id,
+            document_id=str(document_id),
             title=request.title,
             description=request.description,
             status=request.status,
@@ -226,7 +226,7 @@ def mark_document_processing(
 ) -> DocumentResponse:
     result = service.mark_processing(
         MarkDocumentProcessingCommand(
-            document_id=document_id,
+            document_id=str(document_id),
         )
     )
 
@@ -248,7 +248,7 @@ def mark_document_ready(
 ) -> DocumentResponse:
     result = service.mark_ready(
         MarkDocumentReadyCommand(
-            document_id=document_id,
+            document_id=str(document_id),
         )
     )
 
@@ -271,7 +271,7 @@ def mark_document_failed(
 ) -> DocumentResponse:
     result = service.mark_failed(
         MarkDocumentFailedCommand(
-            document_id=document_id,
+            document_id=str(document_id),
             failure_reason=request.failure_reason,
         )
     )
@@ -294,7 +294,7 @@ def archive_document(
 ) -> DocumentResponse:
     result = service.archive(
         ArchiveDocumentCommand(
-            document_id=document_id,
+            document_id=str(document_id),
         )
     )
 
@@ -302,3 +302,56 @@ def archive_document(
         result,
         from_attributes=True,
     )
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_document(
+    document_id: UUID,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    service: DocumentApplicationService = Depends(
+        get_document_application_service,
+    ),
+) -> Response:
+    # Un-index vectors in the background (best-effort) so the delete
+    # request stays fast even for large documents. Reuses the app-wide
+    # session factory (no new engine per request).
+    session_factory = request.app.state.session_factory
+
+    def _cleanup_vectors() -> None:
+        session = session_factory()
+        try:
+            vector_provider = PgVectorProvider(
+                settings=settings,
+                session=session,
+            )
+            vector_provider.delete_document_chunks(
+                document_id=str(document_id),
+            )
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            # Consider logging: logger.error(f"Vector cleanup failed: {e}")
+        finally:
+            session.close()
+
+    background_tasks.add_task(_cleanup_vectors)
+
+    deleted = service.delete(
+        DeleteDocumentCommand(
+            document_id=str(document_id),
+        ),
+    )
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

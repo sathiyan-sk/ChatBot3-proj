@@ -40,3 +40,8 @@ class MarkDocumentFailedCommand:
 @dataclass(slots=True, frozen=True)
 class ArchiveDocumentCommand:
     document_id: str
+
+
+@dataclass(slots=True, frozen=True)
+class DeleteDocumentCommand:
+    document_id: str

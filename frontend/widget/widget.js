@@ -152,13 +152,19 @@
     chatbox.classList.add("oceanrag-hidden");
   });
 
+  // Strip bracketed citation markers like [1], [4], [10] that the LLM
+  // sometimes appends to answers - end users don't need them.
+  function stripCitationMarkers(text) {
+    return String(text || "").replace(/\s*\[\d+\]/g, "");
+  }
+
   // Render text bubble
-  function addMessage(text, sender, sources = []) {
+  function addMessage(text, sender) {
     const bubble = document.createElement("div");
     bubble.className = `oceanrag-msg-row oceanrag-msg-${sender}`;
     
     // Simulate formatting
-    let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    let formattedText = stripCitationMarkers(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formattedText = formattedText.split('\n').join('<br/>');
 
     bubble.innerHTML = `
@@ -166,23 +172,6 @@
         ${formattedText}
       </div>
     `;
-
-    // Render source segments
-    if (sources && sources.length > 0) {
-      const sourcesDiv = document.createElement("div");
-      sourcesDiv.className = "oceanrag-sources-list";
-      sourcesDiv.innerHTML = `<span class="sources-title">Verified citations:</span>`;
-      sources.forEach(src => {
-        const item = document.createElement("div");
-        item.className = "source-item";
-        item.innerHTML = `
-          <div class="source-item-meta">Document: ${src.document_id || "Context"} • Chunk ${src.chunk_id}</div>
-          <div class="source-item-text">"${src.title || ""}"</div>
-        `;
-        sourcesDiv.appendChild(item);
-      });
-      bubble.appendChild(sourcesDiv);
-    }
 
     messagesBox.appendChild(bubble);
     messagesBox.scrollTop = messagesBox.scrollHeight;
@@ -241,7 +230,8 @@
           conversationId = data.conversation_id;
         }
         
-        addMessage(data.answer, "bot", data.citations || []);
+        // Citations are intentionally NOT shown to end users.
+        addMessage(stripCitationMarkers(data.answer), "bot");
       } else if (response.status === 403) {
         addMessage("⚠️ Access denied. This widget is not authorized for this domain.", "bot");
       } else if (response.status === 404) {

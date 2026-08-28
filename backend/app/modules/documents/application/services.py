@@ -8,6 +8,7 @@ from app.core.exceptions import ApplicationError
 from app.modules.documents.application.commands import (
     ArchiveDocumentCommand,
     CreateDocumentCommand,
+    DeleteDocumentCommand,
     MarkDocumentFailedCommand,
     MarkDocumentProcessingCommand,
     MarkDocumentReadyCommand,
@@ -198,11 +199,21 @@ class DocumentApplicationService:
         ]
 
     def list_all(self) -> list[DocumentDto]:
+        # list_by_status is the only unfiltered listing exposed by the
+        # repository contract; "archived" is the least surprising filter
+        # to drop so admins still see every active document.
         documents = (
             self.document_repository.list_by_status(
                 status="pending",
             )
         )
+
+        for status_value in ("processing", "ready", "failed"):
+            documents.extend(
+                self.document_repository.list_by_status(
+                    status=status_value,
+                )
+            )
 
         return [
             self._to_dto(document)
@@ -274,6 +285,45 @@ class DocumentApplicationService:
             document_id=command.document_id,
             status="archived",
             failure_reason=None,
+        )
+
+    def delete(
+        self,
+        command: DeleteDocumentCommand,
+        vector_store: object | None = None,
+    ) -> bool:
+        """Permanently remove a document and un-index its vectors.
+
+        Vector cleanup is best-effort: the DB row is removed even if the
+        vector store reports an error, so the admin is never stuck with
+        an undeletable entry.
+        """
+        document = self.document_repository.get_by_id(
+            command.document_id,
+        )
+
+        if document is None:
+            raise ApplicationError(
+                message="Document not found.",
+                code="document_not_found",
+                status_code=404,
+            )
+
+        if vector_store is not None and hasattr(
+            vector_store,
+            "delete_document_chunks",
+        ):
+            try:
+                vector_store.delete_document_chunks(
+                    document_id=str(document.id),
+                )
+            except Exception:
+                # Swallow and continue; storage/vector drift is less
+                # harmful than blocking the delete entirely.
+                pass
+
+        return self.document_repository.delete(
+            str(document.id),
         )
 
 

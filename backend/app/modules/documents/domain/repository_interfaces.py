@@ -55,3 +55,7 @@ class DocumentRepositoryInterface(ABC):
         failure_reason: str | None,
     ) -> Document:
         raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, document_id: str) -> bool:
+        raise NotImplementedError

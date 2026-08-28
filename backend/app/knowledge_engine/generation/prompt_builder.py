@@ -11,7 +11,8 @@ class PromptBuilder:
         return (
                   "You are a helpful assistant. Answer the question below using the provided context.\n"
         "If the context contains relevant information, use it to give a complete answer.\n"
-        "Cite sources using [1], [2], etc. when you reference specific context items.\n"
+        "Do NOT include citation markers like [1], [2] or any bracketed numbers in your answer - "
+        "write naturally in plain prose.\n"
         "If the context truly has no relevant information, you may use your general knowledge to help.\n\n"
         "Context is provided below. Use it to answer the question."
         )

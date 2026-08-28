@@ -112,11 +112,12 @@ export default function ApplicationDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Document Auto polling for uploaded/parsing states
+  // Document Auto polling for pending/processing states
+  // (backend statuses: pending | processing | ready | failed | archived)
   useEffect(() => {
     if (!knowledgeBase?.id) return;
     
-    const unfinished = documents.some((d) => d.status === "uploaded" || d.status === "parsing");
+    const unfinished = documents.some((d) => d.status === "pending" || d.status === "processing");
     if (unfinished) {
       const interval = setInterval(async () => {
         try {
@@ -278,12 +279,28 @@ export default function ApplicationDetail() {
   };
 
   const handleReindex = async () => {
+    if (!documents.length) return;
     setIsRebuilding(true);
     try {
-      await apiClient.post("/admin/ingestion/start", {
-        document_id: documents[0]?.id,
-      });
-      toast.success(`FAISS Vector Index Synced!`);
+      // Re-ingest every non-archived document (the old implementation
+      // only re-ingested documents[0], which silently skipped the rest).
+      const targets = documents.filter((d) => d.status !== "archived");
+      let queued = 0;
+      for (const doc of targets) {
+        try {
+          await apiClient.post("/admin/ingestion/start", {
+            document_id: doc.id,
+          });
+          queued += 1;
+        } catch (docErr) {
+          console.error(`Reindex failed for document ${doc.id}`, docErr);
+        }
+      }
+      if (queued > 0) {
+        toast.success(`Vector rebuild queued for ${queued} document(s)!`);
+      } else {
+        toast.error("No documents could be queued for reindexing.");
+      }
       // Refresh
       if (knowledgeBase?.id) {
         const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
@@ -836,10 +853,12 @@ export default function ApplicationDetail() {
                               >
                                 <td className="py-3 px-4 font-semibold text-slate-200 flex items-center gap-2.5 max-w-[200px] md:max-w-[280px]">
                                   <FileText className="h-4 w-4 text-[#00D4FF] flex-shrink-0" />
-                                  <span className="truncate" title={doc.original_filename || doc.title}>{doc.original_filename || doc.title}</span>
+                                  <span className="truncate" title={doc.title}>{doc.title}</span>
                                 </td>
                                 <td className="py-3 px-4 text-slate-400 font-mono">
-                                  {doc.file_size_kb || "N/A"} KB
+                                  {doc.file_size_bytes
+                                    ? `${(doc.file_size_bytes / 1024).toFixed(1)} KB`
+                                    : "N/A"}
                                 </td>
                                 <td className="py-3 px-4" data-testid={`document-status-${doc.id}`}>
                                   {doc.status === "ready" && (
@@ -873,11 +892,6 @@ export default function ApplicationDetail() {
                                       </button>
                                     )}
                                     {doc.status === "pending" && (
-                                      <button onClick={() => handleDocAction(doc.id, "ready")} className="p-1.5 border border-emerald-500/10 hover:border-emerald-500/30 rounded-lg hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 transition focus:outline-none" title="Mark ready" data-testid={`ready-btn-${doc.id}`}>
-                                        <Check className="h-3.5 w-3.5" />
-                                      </button>
-                                    )}
-                                    {doc.status === "pending" && (
                                       <button onClick={() => handleDocAction(doc.id, "failed", { failure_reason: "Manually marked failed by admin" })} className="p-1.5 border border-red-500/10 hover:border-red-500/30 rounded-lg hover:bg-red-500/10 text-red-400 hover:text-red-300 transition focus:outline-none" title="Mark failed" data-testid={`fail-btn-${doc.id}`}>
                                         <XCircle className="h-3.5 w-3.5" />
                                       </button>
@@ -887,7 +901,7 @@ export default function ApplicationDetail() {
                                         <Archive className="h-3.5 w-3.5" />
                                       </button>
                                     )}
-                                    <button onClick={() => handleDeleteDoc(doc.id, doc.original_filename || doc.title)} className="p-1.5 border border-red-500/10 hover:border-red-500/30 rounded-lg hover:bg-red-500/10 text-red-400 hover:text-red-300 transition focus:outline-none" title="Delete" data-testid={`delete-btn-${doc.id}`}>
+                                    <button onClick={() => handleDeleteDoc(doc.id, doc.title)} className="p-1.5 border border-red-500/10 hover:border-red-500/30 rounded-lg hover:bg-red-500/10 text-red-400 hover:text-red-300 transition focus:outline-none" title="Delete" data-testid={`delete-btn-${doc.id}`}>
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </button>
                                   </div>

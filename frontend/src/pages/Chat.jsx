@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiClient } from "@/api/client";
-import { Send, Cpu, MessageSquare, Trash2, Copy, ThumbsUp, ChevronDown, ChevronUp, KeyRound } from "lucide-react";
+import { Send, Cpu, MessageSquare, Trash2, Copy, ThumbsUp, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const API_KEY_STORAGE = "oceanrag_chat_api_key";
+
+// Strip bracketed citation markers like [1], [4], [10] that the LLM
+// sometimes appends to answers - end users don't need them.
+function stripCitationMarkers(text) {
+  return String(text || "").replace(/\s*\[\d+\]/g, "");
+}
 
 export default function Chat() {
   const [question, setQuestion] = useState("");
@@ -131,9 +137,11 @@ export default function Chat() {
       const botMsg = {
         id: `bot-${Date.now()}`,
         role: "bot",
-        content: data.answer,
+        // Citations and bracketed [n] markers are intentionally hidden
+        // from end users - answers render as clean prose.
+        content: stripCitationMarkers(data.answer),
         timestamp: new Date().toISOString(),
-        sources: data.citations || [],
+        sources: [],
         conversation_id: data.conversation_id,
       };
 
@@ -141,7 +149,7 @@ export default function Chat() {
     } catch (error) {
       console.error(error);
       toast.error("Failed to fetch response from RAG engine.");
-      
+
       const errorMsg = {
         id: `bot-err-${Date.now()}`,
         role: "bot",
@@ -178,7 +186,7 @@ export default function Chat() {
   return (
     <main className="flex-1 w-full flex flex-col max-w-5xl mx-auto px-4 md:px-8 py-6 h-[calc(100vh-80px)] overflow-hidden">
       {/* Top Banner Context Widget */}
-      <div 
+      <div
         className="w-full glassmorphism rounded-2xl p-4 mb-6 flex flex-wrap items-center justify-between gap-4 text-xs shadow-lg"
         data-testid="chat-system-status-banner"
       >
@@ -277,7 +285,7 @@ export default function Chat() {
                   </div>
                 )}
 
-                <div 
+                <div
                   className={`rounded-2xl px-5 py-3.5 shadow-md leading-relaxed text-sm ${
                     msg.role === "user"
                       ? "bg-gradient-to-r from-[#2563EB] to-[#1E40AF] text-white rounded-tr-none border border-white/10"
@@ -301,7 +309,7 @@ export default function Chat() {
                           </p>
                         );
                       }
-                      
+
                       // Process list items
                       if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
                         return (
@@ -346,10 +354,7 @@ export default function Chat() {
                 </div>
               </div>
 
-              {/* RAG Sources Accordion */}
-              {msg.role === "bot" && msg.sources && msg.sources.length > 0 && (
-                <SourcesAccordion sources={msg.sources} />
-              )}
+              {/* Citations intentionally hidden from end users */}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -380,7 +385,7 @@ export default function Chat() {
       </div>
 
       {/* Sticky Bottom Input Area */}
-      <form 
+      <form
         onSubmit={handleSubmit}
         className="w-full glassmorphism rounded-2xl p-2.5 flex items-center gap-3 border border-white/10 shadow-2xl relative"
         data-testid="chat-form"
@@ -410,47 +415,5 @@ export default function Chat() {
         </button>
       </form>
     </main>
-  );
-}
-
-// Sub-component for clean inline sources list accordion
-function SourcesAccordion({ sources }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className="mt-2.5 max-w-[85%] w-full sm:pl-11" data-testid="rag-sources-container">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 text-xs font-semibold text-[#00D4FF] hover:text-white transition duration-200 py-1 focus:outline-none"
-        data-testid="toggle-sources-btn"
-      >
-        <span>RAG Grounding: {sources.length} matching segment{sources.length > 1 ? "s" : ""}</span>
-        {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-      </button>
-
-      {isOpen && (
-        <div className="mt-2 space-y-2.5 animate-fadeIn">
-          {sources.map((src, idx) => (
-            <div 
-              key={idx} 
-              className="bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-slate-300"
-              data-testid={`rag-source-${idx}`}
-            >
-              <div className="flex items-center justify-between mb-1.5 pb-1.5 border-b border-white/5">
-                <span className="font-semibold text-slate-200 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                  Source: {src.document_id || "Context"}
-                </span>
-                <span className="text-[10px] text-[#00D4FF] font-mono">
-                  Chunk: {src.chunk_id}
-                </span>
-              </div>
-              <p className="leading-relaxed italic bg-[#040914]/40 p-2 rounded border border-white/5 font-mono text-[11px]">
-                {src.title}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

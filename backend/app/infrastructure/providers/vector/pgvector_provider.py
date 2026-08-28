@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config.settings import Settings
 from app.core.exceptions import ApplicationError
 from app.knowledge_engine.contracts.vector_store import VectorStoreContract
 from app.knowledge_engine.shared.models import RetrievedChunk
@@ -12,7 +14,7 @@ from app.knowledge_engine.shared.models import RetrievedChunk
 
 @dataclass(slots=True)
 class PgVectorProvider(VectorStoreContract):
-    settings: object
+    settings: Settings
     session: Session
 
     def index_chunk(
@@ -120,7 +122,10 @@ class PgVectorProvider(VectorStoreContract):
                 "top_k": top_k,
             },
         )
-        return [self._map_row_to_retrieved_chunk(row) for row in result.mappings().all()]
+        return [
+            self._map_row_to_retrieved_chunk(dict(row))
+            for row in result.mappings().all()
+        ]
 
     def keyword_search(
         self,
@@ -160,9 +165,42 @@ class PgVectorProvider(VectorStoreContract):
                 "top_k": top_k,
             },
         )
-        return [self._map_row_to_retrieved_chunk(row) for row in result.mappings().all()]
+        return [
+            self._map_row_to_retrieved_chunk(dict(row))
+            for row in result.mappings().all()
+        ]
 
-    def _map_row_to_retrieved_chunk(self, row: dict) -> RetrievedChunk:
+    def delete_document_chunks(self, *, document_id: str) -> int:
+        """Remove all indexed chunks belonging to a document.
+
+        Returns the number of deleted rows so callers can log/verify.
+        """
+        table_name = self.settings.vector_store_table_name
+
+        statement = text(
+            f"""
+            delete from {table_name}
+            where document_id = cast(:document_id as text)
+            """
+        )
+
+        result = self.session.execute(
+            statement,
+            {
+                "document_id": (
+                    str(document_id)
+                    if not isinstance(document_id, str)
+                    else document_id
+                ),
+            },
+        )
+        # rowcount lives on CursorResult; getattr keeps type checkers happy.
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def _map_row_to_retrieved_chunk(
+        self,
+        row: Mapping[str, Any],
+    ) -> RetrievedChunk:
         metadata = row.get("metadata_json") or {}
         return RetrievedChunk(
             chunk_id=row["chunk_id"],
