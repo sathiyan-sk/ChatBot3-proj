@@ -150,7 +150,7 @@ VITE_FRONTEND_URL=https://app.example.com
 
 The backend **does not need** FRONTEND_URL configuration. Widget files are handled entirely by the frontend.
 
-The backend still has legacy support for serving widget files at `/widget/` for backward compatibility, but this is NOT the primary flow.
+The backend does not serve widget files. It only serves API endpoints; widget assets are served by the frontend.
 
 ## Key Changes from Previous Architecture
 
@@ -178,21 +178,15 @@ frontend/
 ├── public/widget/          ← Served as-is at /widget/ in dev and production
 │   ├── widget.js
 │   └── widget.css
-├── widget/                 ← Source/development copy (mirrors public/widget/)
-│   ├── widget.js
-│   └── widget.css
 ├── src/pages/
 │   └── ApplicationDetail.jsx  ← Generates embed snippets with FRONTEND_URL
 └── vite.config.js          ← Configured to serve public/widget/ assets
 ```
 
-### Backend (Legacy Support Only)
+### Backend
 ```
 backend/
-├── static/widget/          ← Legacy: kept for backward compatibility
-│   ├── widget.js
-│   └── widget.css
-└── app/main.py            ← Still mounts /widget but marked as LEGACY
+└── app/main.py            ← Serves API endpoints only
 ```
 
 ## Testing the Widget Serving
@@ -335,16 +329,9 @@ If you're migrating from the previous architecture (widget from BACKEND_URL):
 2. **Update frontend .env** ✅ (Already done)
    - Add VITE_FRONTEND_URL configuration
 
-3. **Keep backend mount** ✅ (Already done)
-   - Marked as LEGACY for backward compatibility
-   - Old embed snippets still work
-
-4. **Test widget on new URL**
+3. **Test widget on new URL**
    - Copy new embed snippet from admin dashboard
    - Test on client website
    - Verify widget.js loads from FRONTEND_URL
 
-5. **Gradually retire old setup**
-   - Keep backend mount until all clients migrate
-   - Monitor backend /widget/ requests
-   - Once all clients updated, remove backend mount
+Old embed snippets using `BACKEND_URL/widget/widget.js` must be replaced because the backend no longer serves widget assets.

@@ -102,6 +102,7 @@
   async function loadWidgetSettings() {
     try {
       const response = await fetch(`${API_URL}/api/client/widget/configuration`, {
+        cache: "no-store",
         headers: {
           "X-Widget-Key": WIDGET_PUBLIC_KEY,
         },

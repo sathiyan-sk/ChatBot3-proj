@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     Header,
+    Response,
     status,
 )
 
@@ -31,6 +32,7 @@ router = APIRouter(
     status_code=status.HTTP_200_OK,
 )
 def get_widget_configuration(
+    response: Response,
     x_widget_key: str | None = Header(
         default=None,
         alias="X-Widget-Key",
@@ -40,6 +42,8 @@ def get_widget_configuration(
         get_widget_application_service,
     ),
 ) -> PublicWidgetConfigurationResponse:
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     configuration = (
         service.get_public_configuration(
             x_widget_key or "",

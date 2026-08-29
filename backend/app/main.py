@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.api.dependencies import get_knowledge_ingestion_pipeline
 from app.api.dynamic_cors import register_dynamic_cors_middleware
@@ -86,13 +84,6 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router)
-    # LEGACY: Serve widget static assets from backend for backward compatibility
-    # New applications use frontend-served widget files (FRONTEND_URL/widget/)
-    # This mount is kept for legacy applications that still reference BACKEND_URL/widget/
-    # The primary flow is now: widget.js served from FRONTEND_URL → API calls to BACKEND_URL
-    static_dir = Path(__file__).resolve().parent.parent / "static"
-    if static_dir.exists():
-        app.mount("/widget", StaticFiles(directory=static_dir / "widget"), name="widget")
 
     @app.get("/health", tags=["Health"])
     def health_check() -> dict[str, str]:
