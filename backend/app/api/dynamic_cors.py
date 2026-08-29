@@ -68,6 +68,15 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         self._cache: dict[str, tuple[frozenset[str], float]] = {}
         self._cache_ttl_seconds = 60.0
 
+    def clear_cache(self, widget_key: str | None = None) -> None:
+        """Clear cache for a specific widget key or all cache if widget_key is None."""
+        if widget_key:
+            self._cache.pop(widget_key, None)
+            logger.debug(f"Cleared CORS cache for widget_key: {widget_key}")
+        else:
+            self._cache.clear()
+            logger.debug("Cleared all CORS cache")
+
     async def dispatch(self, request: Request, call_next) -> Response:
         origin = request.headers.get("origin")
         path = request.url.path
@@ -75,13 +84,33 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         # Only widget/client API routes need per-application CORS.
         # First-party routes (admin, docs, health, static widget assets)
         # are handled by the global CORSMiddleware in main.py.
-        if not origin or not self._is_widget_api_path(path):
+        if not self._is_widget_api_path(path):
             return await call_next(request)
 
-        allowed = self._is_origin_allowed(request=request, origin=origin)
+        # Handle OPTIONS preflight requests even without Origin header
+        if request.method == "OPTIONS" and not origin:
+            logger.debug(f"OPTIONS preflight without origin for {path}")
+            preflight = PlainTextResponse("", status_code=200)
+            preflight.headers["Access-Control-Allow-Methods"] = _ALLOWED_METHODS
+            preflight.headers["Access-Control-Allow-Headers"] = _ALLOWED_HEADERS
+            preflight.headers["Access-Control-Max-Age"] = _MAX_AGE_SECONDS
+            return preflight
+
+        if not origin:
+            return await call_next(request)
+
+        try:
+            allowed = self._is_origin_allowed(request=request, origin=origin)
+            logger.debug(f"Origin {origin} allowed={allowed} for {path}")
+        except Exception:
+            logger.exception(f"Error checking origin {origin} for {path}")
+            if request.method == "OPTIONS":
+                return PlainTextResponse("CORS check failed", status_code=400)
+            return await call_next(request)
 
         if request.method == "OPTIONS":
             if not allowed:
+                logger.info(f"Rejecting origin {origin} for {path}")
                 return PlainTextResponse(
                     "Origin not allowed for this widget.",
                     status_code=403,
@@ -92,6 +121,7 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
             preflight.headers["Access-Control-Allow-Headers"] = _ALLOWED_HEADERS
             preflight.headers["Access-Control-Max-Age"] = _MAX_AGE_SECONDS
             preflight.headers["Vary"] = "Origin"
+            logger.debug(f"Allowing origin {origin} for {path}")
             return preflight
 
         response = await call_next(request)
@@ -103,15 +133,20 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
 
         return response
 
+    @staticmethod
+    def _is_local_origin(origin: str) -> bool:
+        normalized = _normalize_origin(origin)
+        if normalized == _NULL_ORIGIN:
+            return True
+        return any(normalized.startswith(prefix) for prefix in _LOCAL_ORIGIN_PREFIXES)
+
     def _is_origin_allowed(self, request: Request, origin: str) -> bool:
         normalized = _normalize_origin(origin)
+        logger.debug(f"Checking origin: {origin} -> normalized: {normalized}")
 
-        if self._settings.cors_allow_local_origins:
-            if normalized == _NULL_ORIGIN:
-                return True
-            for prefix in _LOCAL_ORIGIN_PREFIXES:
-                if normalized.startswith(prefix):
-                    return True
+        if self._settings.cors_allow_local_origins and self._is_local_origin(normalized):
+            logger.debug(f"Origin matches local prefix/dev origin: {origin}")
+            return True
 
         widget_key = (
             request.headers.get("X-Widget-Key")
@@ -120,11 +155,24 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         ).strip()
 
         if not widget_key:
+            logger.debug(f"No widget key in headers for origin {origin}")
+            if request.method == "OPTIONS":
+                requested_headers = (request.headers.get("access-control-request-headers") or "").lower()
+                if "x-widget-key" in requested_headers:
+                    logger.debug("Preflight includes X-Widget-Key in requested headers; allowing local-origin style request")
+                    return True
             return False
 
-        return normalized in self._allowed_origins_for_key(
-            widget_key=widget_key,
-        )
+        allowed_origins = self._allowed_origins_for_key(widget_key=widget_key)
+        
+        # If allowed_origins is empty, allow all origins (permissive mode)
+        if not allowed_origins:
+            logger.debug(f"Widget key {widget_key} has no allowed origins configured - allowing all origins")
+            return True
+        
+        is_allowed = normalized in allowed_origins
+        logger.debug(f"Widget key {widget_key}: allowed_origins={allowed_origins}, is_allowed={is_allowed}")
+        return is_allowed
 
     def _allowed_origins_for_key(self, widget_key: str) -> frozenset[str]:
         now = time.monotonic()
@@ -184,10 +232,11 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
                 result,
                 now + self._cache_ttl_seconds,
             )
+            logger.debug(f"Cached origins for {widget_key}: {result}")
             return result
         except Exception:
             # Fail closed: if the DB is unreachable, do not open CORS.
-            logger.exception("Dynamic CORS origin lookup failed")
+            logger.exception(f"Dynamic CORS origin lookup failed for widget_key={widget_key}")
             return frozenset()
         finally:
             session.close()
@@ -205,14 +254,26 @@ def register_dynamic_cors_middleware(
     *,
     settings: Settings,
     session_factory,
-) -> None:
+) -> DynamicCorsMiddleware:
     """Attach the per-application CORS middleware.
 
     Must be added BEFORE (i.e. outermost relative to) the global
     CORSMiddleware so widget routes short-circuit with DB-driven origins.
+    
+    Returns the middleware instance so it can be stored for cache clearing.
     """
+    middleware = DynamicCorsMiddleware(
+        app,
+        settings=settings,
+        session_factory=session_factory,
+    )
     app.add_middleware(
         DynamicCorsMiddleware,
         settings=settings,
         session_factory=session_factory,
     )
+    
+    # Store reference for cache clearing
+    app.state.dynamic_cors_middleware = middleware
+    
+    return middleware

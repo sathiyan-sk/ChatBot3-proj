@@ -31,10 +31,26 @@
     return;
   }
 
+  // Determine widget base URL from the script's location
+  // If widget is served from frontend, use that domain for CSS
+  // Fall back to API_URL if needed
+  let widgetBaseUrl = API_URL + "/widget";
+  
+  // Try to detect widget script location if it was loaded from a different origin
+  const scripts = document.querySelectorAll("script[src*='widget.js']");
+  if (scripts.length > 0) {
+    const lastScript = scripts[scripts.length - 1];
+    const scriptSrc = lastScript.src;
+    // Extract base path from script URL (e.g., from "https://localhost:5173/widget/widget.js" get "https://localhost:5173")
+    const scriptUrl = new URL(scriptSrc);
+    const scriptBaseUrl = `${scriptUrl.protocol}//${scriptUrl.host}`;
+    widgetBaseUrl = scriptBaseUrl + "/widget";
+  }
+
   // Load css stylesheet dynamically
   const link = document.createElement("link");
   link.rel = "stylesheet";
-  link.href = API_URL + "/widget/widget.css";
+  link.href = widgetBaseUrl + "/widget.css";
   document.head.appendChild(link);
 
   // Widget state
@@ -236,6 +252,8 @@
         addMessage("⚠️ Access denied. This widget is not authorized for this domain.", "bot");
       } else if (response.status === 404) {
         addMessage("⚠️ Widget configuration not found. Please contact support.", "bot");
+      } else if (response.status === 409) {
+        addMessage("⚠️ This widget is ready, but there are no ready documents in the knowledge base yet. Add content and wait for processing to finish.", "bot");
       } else {
         addMessage("⚠️ Failed to process your request. Please try again later.", "bot");
       }

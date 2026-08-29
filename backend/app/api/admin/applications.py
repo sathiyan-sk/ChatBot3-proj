@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_container
+from app.api.dependencies import get_container, clear_cors_cache
 from app.api.schemas.applications import (
     ApplicationResponse,
     CreateApplicationRequest,
@@ -133,6 +133,7 @@ def get_application(
 def update_application(
     application_id: str,
     payload: UpdateApplicationRequest,
+    request: Request,
     container: ApplicationContainer = Depends(get_container),
 ) -> ApplicationResponse:
     session, service = _build_application_services(container)
@@ -148,6 +149,9 @@ def update_application(
                 is_active=payload.is_active,
             )
         )
+        
+        # Clear CORS cache for all widget keys since allowed_origins changed
+        clear_cors_cache(request)
 
         return _application_response(result)
 

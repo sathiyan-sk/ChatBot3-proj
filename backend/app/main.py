@@ -55,31 +55,41 @@ def create_app() -> FastAPI:
         lifespan=create_lifespan(settings, session_factory),
     )
 
-    # Register per-application dynamic CORS BEFORE global CORS.
-    # Widget/client routes will use DB-driven origins; others fall through to global CORS.
+    # Global CORS is added first so Starlette executes it before the
+    # per-application widget middleware. The widget middleware must still be
+    # the last custom handler in the stack so it can short-circuit the DB-driven
+    # origin checks for /api/client/* requests.
+    cors_origins = list(settings.cors_allowed_origins) if settings.cors_allowed_origins else []
+    if settings.cors_allow_local_origins and "http://localhost:3000" not in cors_origins:
+        cors_origins.extend([
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ])
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?" if settings.cors_allow_local_origins else None,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Origin", "X-Widget-Key", "X-API-Key", "Authorization", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
+        expose_headers=["Content-Type", "X-Widget-Key"],
+    )
+
     register_dynamic_cors_middleware(
         app,
         settings=settings,
         session_factory=session_factory,
     )
 
-    # Global CORS for first-party surfaces (admin dashboard, web chat).
-    # Widget/client API origins are resolved per-application from the database.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(settings.cors_allowed_origins) if settings.cors_allowed_origins else [],
-        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?" if settings.cors_allow_local_origins else None,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Origin", "X-Widget-Key", "X-API-Key", "Authorization"],
-        expose_headers=["Content-Type", "X-Widget-Key"],
-    )
-
     register_exception_handlers(app)
     app.include_router(api_router)
-    # Serve the embeddable widget static assets (widget.js, widget.css) so that
-    # client websites can load the widget from the backend origin - the same
-    # origin they already use for API calls.
+    # LEGACY: Serve widget static assets from backend for backward compatibility
+    # New applications use frontend-served widget files (FRONTEND_URL/widget/)
+    # This mount is kept for legacy applications that still reference BACKEND_URL/widget/
+    # The primary flow is now: widget.js served from FRONTEND_URL → API calls to BACKEND_URL
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.exists():
         app.mount("/widget", StaticFiles(directory=static_dir / "widget"), name="widget")

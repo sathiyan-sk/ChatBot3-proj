@@ -72,7 +72,9 @@ export default function ApplicationDetail() {
           setDocuments(docsRes.data);
         }
 
-        // Fetch widget configuration
+        // Fetch widget configuration.
+        // New applications may legitimately not have a widget yet; in that case
+        // we keep the page quiet and let the admin create one from the form below.
         try {
           const widgetRes = await apiClient.get(`/admin/widgets/application/${id}`);
           setWidgetCfg(widgetRes.data);
@@ -81,8 +83,16 @@ export default function ApplicationDetail() {
           setLauncherLabel(widgetRes.data.launcher_label || "Chat with us");
           setPlaceholderText(widgetRes.data.placeholder_text || "Type your message...");
           setIsWidgetEnabled(widgetRes.data.is_enabled);
-        } catch {
-          console.warn("No widget found for this application");
+        } catch (error) {
+          if (error.response?.status !== 404) {
+            console.warn("Failed to load widget configuration for this application", error);
+          }
+          setWidgetCfg(null);
+          setGreetingMsg("");
+          setThemeColor("#00D4FF");
+          setLauncherLabel("Chat with us");
+          setPlaceholderText("Type your message...");
+          setIsWidgetEnabled(true);
         }
 
         // Fetch settings
@@ -171,17 +181,32 @@ export default function ApplicationDetail() {
           is_enabled: isWidgetEnabled,
         });
       } else {
-        // Create new widget
-        await apiClient.post("/admin/widgets", {
-          application_id: id,
-          display_name: app?.name || "Support Widget",
-          theme: themeColor.startsWith("#") ? "light" : themeColor,
-          launcher_label: launcherLabel,
-          welcome_message: greetingMsg,
-          placeholder_text: placeholderText,
-          is_enabled: isWidgetEnabled,
-        });
-        fetchAppData(); // Refresh to get the created widget
+        try {
+          // Create new widget
+          await apiClient.post("/admin/widgets", {
+            application_id: id,
+            display_name: app?.name || "Support Widget",
+            theme: themeColor.startsWith("#") ? "light" : themeColor,
+            launcher_label: launcherLabel,
+            welcome_message: greetingMsg,
+            placeholder_text: placeholderText,
+            is_enabled: isWidgetEnabled,
+          });
+        } catch (error) {
+          if (error.response?.status === 409) {
+            const existing = await apiClient.get(`/admin/widgets/application/${id}`);
+            await apiClient.put(`/admin/widgets/${existing.data.id}`, {
+              display_name: existing.data.display_name || app?.name || "Support Widget",
+              theme: themeColor.startsWith("#") ? "light" : themeColor,
+              launcher_label: launcherLabel,
+              welcome_message: greetingMsg,
+              placeholder_text: placeholderText,
+              is_enabled: isWidgetEnabled,
+            });
+          } else {
+            throw error;
+          }
+        }
       }
       toast.success("Widget appearance and access contracts updated!");
       fetchAppData(); // Refresh widget config
@@ -405,10 +430,12 @@ export default function ApplicationDetail() {
   };
 
   // Embed Snippet
-  // The widget script is served by the BACKEND (mounted at /widget) so the client
-  // website can load it from the same origin it already uses for API calls.
-  // backendUrl points to the backend for API calls (configuration + chat messages).
+  // Widget script is served from FRONTEND (at /widget) for better separation of concerns
+  // Backend URL is used for API calls (configuration + chat messages + CORS validation)
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  // Widget URL - for development use localhost:5173, for production use the same origin as the admin page
+  const FRONTEND_URL = import.meta.env.VITE_FRONTEND_URL || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : "http://localhost:5173");
+  
   const embedSnippetHtml = widgetCfg ? `<!-- OceanRAG Embeddable Widget Snippet -->
 <script>
   // SECURITY: widgetKey is the only credential needed for authentication
@@ -419,7 +446,7 @@ export default function ApplicationDetail() {
     backendUrl: "${BACKEND_URL}"
   };
 </script>
-<script src="${BACKEND_URL}/widget/widget.js" async></script>` : "";
+<script src="${FRONTEND_URL}/widget/widget.js" async></script>` : "";
 
   const copyToClipboard = (text, type) => {
     navigator.clipboard.writeText(text);

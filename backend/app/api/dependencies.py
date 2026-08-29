@@ -154,6 +154,23 @@ def get_settings(
     return request.app.state.settings
 
 
+def clear_cors_cache(
+    request: Request,
+    widget_key: str | None = None,
+) -> None:
+    """Clear the DynamicCorsMiddleware cache.
+    
+    Args:
+        request: FastAPI Request object
+        widget_key: Specific widget key to clear, or None to clear all cache
+    """
+    if hasattr(request.app.state, "dynamic_cors_middleware"):
+        request.app.state.dynamic_cors_middleware.clear_cache(widget_key)
+    else:
+        # Middleware not initialized or not stored
+        pass
+
+
 def get_session(
     request: Request,
 ) -> Generator[Session, None, None]:

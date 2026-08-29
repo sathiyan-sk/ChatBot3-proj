@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
-import { UploadCloud, Layers, Trash2, RefreshCw, CheckCircle2, AlertCircle, FileText, Loader2, Database } from "lucide-react";
+import { UploadCloud, Layers, Trash2, RefreshCw, CheckCircle2, AlertCircle, FileText, Loader2, Database, Plus, Edit2 } from "lucide-react";
 import { toast } from "sonner";
+import ApplicationForm from "@/components/ApplicationForm";
 
 export default function Admin() {
   const [applications, setApplications] = useState([]);
@@ -11,6 +12,8 @@ export default function Admin() {
   const [isUploading, setIsUploading] = useState(false);
   const [isRebuilding, setIsRebuilding] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [showApplicationForm, setShowApplicationForm] = useState(false);
+  const [editingApp, setEditingApp] = useState(null);
 
   // Compute stats from documents (derived state)
   const stats = {
@@ -235,6 +238,35 @@ export default function Admin() {
               </option>
             ))}
           </select>
+
+          {/* Create Application Button */}
+          <button
+            onClick={() => {
+              setEditingApp(null);
+              setShowApplicationForm(true);
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs bg-gradient-to-r from-[#00D4FF] to-[#2563EB] text-[#040914] hover:scale-[1.03] active:scale-[0.97] transition"
+            title="Create New Application"
+          >
+            <Plus className="h-4 w-4" />
+            <span>New App</span>
+          </button>
+
+          {/* Edit Application Button */}
+          {selectedAppId && (
+            <button
+              onClick={() => {
+                const app = applications.find((a) => a.id === selectedAppId);
+                setEditingApp(app);
+                setShowApplicationForm(true);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs border border-white/20 text-white hover:bg-white/5 transition"
+              title="Edit Application"
+            >
+              <Edit2 className="h-4 w-4" />
+              <span>Edit</span>
+            </button>
+          )}
 
           {/* Global Reindex Action */}
           <button
@@ -471,5 +503,23 @@ export default function Admin() {
         </div>
       </div>
     </main>
+
+    {/* Application Form Modal */}
+    {showApplicationForm && (
+      <ApplicationForm
+        app={editingApp}
+        onClose={() => {
+          setShowApplicationForm(false);
+          setEditingApp(null);
+        }}
+        onSuccess={async () => {
+          const updatedApps = await fetchApplications();
+          setApplications(updatedApps);
+          if (updatedApps.length > 0 && !selectedAppId) {
+            setSelectedAppId(updatedApps[0].id);
+          }
+        }}
+      />
+    )}
   );
 }

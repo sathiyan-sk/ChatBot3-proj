@@ -16,4 +16,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Widget files in public/widget/ are automatically served at /widget/
+  // No special configuration needed - Vite serves the public folder as-is
 })

@@ -52,7 +52,10 @@ class ChatApplicationService:
         ]
         if not ready_documents:
             raise ApplicationError(
-                message="No ready documents available for question answering.",
+                message=(
+                    "No ready documents are available for question answering yet. "
+                    "Upload or ingest content, then wait for the index to finish processing."
+                ),
                 code="knowledge_base_has_no_ready_documents",
                 status_code=409,
             )

@@ -7,11 +7,13 @@ from fastapi import (
     Depends,
     status,
     Response,
+    Request,
 )
 
 from app.api.dependencies import (
     get_widget_application_service,
     require_admin,
+    clear_cors_cache,
 )
 from app.api.schemas.widgets import (
     CreateWidgetRequest,
@@ -42,22 +44,26 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 def create_widget(
-    request: CreateWidgetRequest,
+    request_payload: CreateWidgetRequest,
+    request: Request,
     service: WidgetApplicationService = Depends(
         get_widget_application_service,
     ),
 ) -> WidgetResponse:
     result = service.create(
         CreateWidgetCommand(
-            application_id=request.application_id,
-            display_name=request.display_name,
-            theme=request.theme,
-            launcher_label=request.launcher_label,
-            welcome_message=request.welcome_message,
-            placeholder_text=request.placeholder_text,
-            is_enabled=request.is_enabled,
+            application_id=request_payload.application_id,
+            display_name=request_payload.display_name,
+            theme=request_payload.theme,
+            launcher_label=request_payload.launcher_label,
+            welcome_message=request_payload.welcome_message,
+            placeholder_text=request_payload.placeholder_text,
+            is_enabled=request_payload.is_enabled,
         )
     )
+    
+    # Clear CORS cache since new widget was created
+    clear_cors_cache(request)
 
     return WidgetResponse.model_validate(
         result,
@@ -109,7 +115,8 @@ def get_widget(
 )
 def update_widget(
     widget_id: UUID,
-    request: UpdateWidgetRequest,
+    request_payload: UpdateWidgetRequest,
+    request: Request,
     service: WidgetApplicationService = Depends(
         get_widget_application_service,
     ),
@@ -117,14 +124,17 @@ def update_widget(
     result = service.update(
         UpdateWidgetCommand(
             widget_id=widget_id,
-            display_name=request.display_name,
-            theme=request.theme,
-            launcher_label=request.launcher_label,
-            welcome_message=request.welcome_message,
-            placeholder_text=request.placeholder_text,
-            is_enabled=request.is_enabled,
+            display_name=request_payload.display_name,
+            theme=request_payload.theme,
+            launcher_label=request_payload.launcher_label,
+            welcome_message=request_payload.welcome_message,
+            placeholder_text=request_payload.placeholder_text,
+            is_enabled=request_payload.is_enabled,
         )
     )
+    
+    # Clear CORS cache since widget configuration changed
+    clear_cors_cache(request)
 
     return WidgetResponse.model_validate(
         result,
