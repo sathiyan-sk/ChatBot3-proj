@@ -23,6 +23,32 @@
 
 ## .Create project
 
+## Render CORS configuration
+
+Set these environment variables on the **backend Render service**:
+
+```env
+FRONTEND_URL=https://chatbot3-proj-1.onrender.com
+ALLOWED_ORIGINS=https://chatbot3-proj-1.onrender.com
+CORS_ALLOW_LOCAL_ORIGINS=false
+```
+
+`FRONTEND_URL` is automatically merged into the backend global CORS allow-list,
+so the deployed admin frontend can call the API. `ALLOWED_ORIGINS` may also
+contain additional first-party origins separated by commas.
+
+Embedded customer sites are configured separately in the application's
+`allowed_origins` field in the admin UI. Add the complete origin, for example
+`https://customer.example.com`, without a trailing slash or path. Do not add
+only the frontend Render URL unless the widget is actually embedded there.
+
+Set these variables on the **frontend Render service**:
+
+```env
+VITE_BACKEND_URL=https://chatbot3-proj.onrender.com
+VITE_FRONTEND_URL=https://chatbot3-proj-1.onrender.com
+```
+
 mkdir D:\AI-Projects
 cd D:\AI-Projects
 

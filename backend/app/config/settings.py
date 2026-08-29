@@ -267,12 +267,17 @@ def load_settings() -> Settings:
             "AI-Knowledge-Platform/1.0",
         ),
         cors_allowed_origins=tuple(
-            item.strip()
-            for item in os.getenv(
-                "ALLOWED_ORIGINS",
-                "http://localhost:3000,http://localhost:5173",
-            ).split(",")
-            if item.strip()
+            dict.fromkeys(
+                item.strip().rstrip("/")
+                for item in (
+                    os.getenv(
+                        "ALLOWED_ORIGINS",
+                        "http://localhost:3000,http://localhost:5173",
+                    ).split(",")
+                    + [os.getenv("FRONTEND_URL", "")]
+                )
+                if item.strip()
+            )
         ),
         cors_allow_local_origins=os.getenv(
             "CORS_ALLOW_LOCAL_ORIGINS",
