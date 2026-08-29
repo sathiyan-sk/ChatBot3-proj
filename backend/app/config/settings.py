@@ -82,6 +82,12 @@ class Settings:
         "AI-Knowledge-Platform/1.0"
     )
 
+    # Global CORS origins for first-party surfaces (admin dashboard, web
+    # chat). Widget/client origins are resolved PER-APPLICATION from the
+    # database (applications.allowed_origins) by DynamicCorsMiddleware.
+    cors_allowed_origins: tuple[str, ...] = ()
+    cors_allow_local_origins: bool = True
+
 def load_settings() -> Settings:
     provider_timeout_seconds = float(
         os.getenv(
@@ -260,6 +266,19 @@ def load_settings() -> Settings:
             "HTTP_USER_AGENT",
             "AI-Knowledge-Platform/1.0",
         ),
+        cors_allowed_origins=tuple(
+            item.strip()
+            for item in os.getenv(
+                "ALLOWED_ORIGINS",
+                "http://localhost:3000,http://localhost:5173",
+            ).split(",")
+            if item.strip()
+        ),
+        cors_allow_local_origins=os.getenv(
+            "CORS_ALLOW_LOCAL_ORIGINS",
+            "true",
+        ).strip().lower()
+        in {"1", "true", "yes"},
     )
 
 
