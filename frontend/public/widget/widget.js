@@ -154,13 +154,22 @@
     chatbox.classList.add("oceanrag-hidden");
   });
 
+  // The API may return citations for admin/debugging, but the public widget
+  // displays only the answer text.
+  function cleanAnswerText(text) {
+    return String(text || "")
+      .replace(/\s*\[\d+\]/g, "")
+      .replace(/\s*\[(?:citation|source|ref(?:erence)?)\s*\d*\]/gi, "")
+      .trim();
+  }
+
   // Render text bubble
-  function addMessage(text, sender, sources = []) {
+  function addMessage(text, sender) {
     const bubble = document.createElement("div");
     bubble.className = `oceanrag-msg-row oceanrag-msg-${sender}`;
     
     // Simulate formatting
-    let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    let formattedText = cleanAnswerText(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formattedText = formattedText.split('\n').join('<br/>');
 
     bubble.innerHTML = `
@@ -168,23 +177,6 @@
         ${formattedText}
       </div>
     `;
-
-    // Render source segments
-    if (sources && sources.length > 0) {
-      const sourcesDiv = document.createElement("div");
-      sourcesDiv.className = "oceanrag-sources-list";
-      sourcesDiv.innerHTML = `<span class="sources-title">Verified citations:</span>`;
-      sources.forEach(src => {
-        const item = document.createElement("div");
-        item.className = "source-item";
-        item.innerHTML = `
-          <div class="source-item-meta">Document: ${src.document_id || "Context"} • Chunk ${src.chunk_id}</div>
-          <div class="source-item-text">"${src.title || ""}"</div>
-        `;
-        sourcesDiv.appendChild(item);
-      });
-      bubble.appendChild(sourcesDiv);
-    }
 
     messagesBox.appendChild(bubble);
     messagesBox.scrollTop = messagesBox.scrollHeight;
@@ -243,7 +235,8 @@
           conversationId = data.conversation_id;
         }
         
-        addMessage(data.answer, "bot", data.citations || []);
+        // Keep citations out of the public widget; only render the answer.
+        addMessage(cleanAnswerText(data.answer), "bot");
       } else if (response.status === 403) {
         addMessage("⚠️ Access denied. This widget is not authorized for this domain.", "bot");
       } else if (response.status === 404) {

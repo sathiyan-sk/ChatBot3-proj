@@ -446,7 +446,7 @@ export default function ApplicationDetail() {
     backendUrl: "${BACKEND_URL}"
   };
 </script>
-<script src="${FRONTEND_URL}/widget/widget.js" async></script>` : "";
+<script src="${FRONTEND_URL}/widget/widget.js?v=2" async></script>` : "";
 
   const copyToClipboard = (text, type) => {
     navigator.clipboard.writeText(text);
