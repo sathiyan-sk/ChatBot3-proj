@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    OceanRAG Embeddable Widget Stylesheet
    Themes: [data-oceanrag-theme="light"] (default) | "dark"
    Responsive: full-bleed panel on small screens (<480px)
@@ -8,7 +8,7 @@
   font-family: 'Manrope', 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   z-index: 999999;
   position: relative;
-  /* Theme colors as CSS variables so both themes stay in sync */
+  /* Expose theme colors as CSS variables so both themes stay in sync */
   --oceanrag-accent: #00D4FF;
   --oceanrag-accent-contrast: #040914;
   --oceanrag-panel-bg: rgba(255, 255, 255, 0.97);
@@ -81,7 +81,7 @@
   transform: scale(0.95);
 }
 
-/* Icon morph: chat icon by default, close icon when open */
+/* Icon morph: chat icon visible by default, close icon when open */
 .oceanrag-launcher .oceanrag-icon-close {
   display: none;
   position: absolute;
@@ -381,7 +381,7 @@
 }
 
 /* ============================================================
-   RESPONSIVE - small screens / mobile
+   RESPONSIVE — small screens / mobile
    ============================================================ */
 @media (max-width: 480px) {
   .oceanrag-launcher {
@@ -438,7 +438,7 @@
   }
 }
 
-/* Landscape phones: keep the panel usable */
+/* Very short landscape phones: keep the panel usable */
 @media (max-width: 480px) and (orientation: landscape) {
   .oceanrag-chatbox {
     height: 100dvh;

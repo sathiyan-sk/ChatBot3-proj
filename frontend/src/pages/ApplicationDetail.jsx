@@ -32,7 +32,9 @@ export default function ApplicationDetail() {
 
   // Widget appearance configurations
   const [greetingMsg, setGreetingMsg] = useState("");
-  const [themeColor, setThemeColor] = useState("#00D4FF");
+  // Theme is stored as the semantic value (light/dark) that the
+  // backend persists - NOT a hex color. The preview maps theme -> color.
+  const [widgetTheme, setWidgetTheme] = useState("light");
   const [launcherLabel, setLauncherLabel] = useState("Chat with us");
   const [placeholderText, setPlaceholderText] = useState("Type your message...");
   const [isWidgetEnabled, setIsWidgetEnabled] = useState(true);
@@ -79,7 +81,7 @@ export default function ApplicationDetail() {
           const widgetRes = await apiClient.get(`/admin/widgets/application/${id}`);
           setWidgetCfg(widgetRes.data);
           setGreetingMsg(widgetRes.data.welcome_message || "");
-          setThemeColor(widgetRes.data.theme === "dark" ? "#1a1a1a" : "#00D4FF");
+          setWidgetTheme(widgetRes.data.theme === "dark" ? "dark" : "light");
           setLauncherLabel(widgetRes.data.launcher_label || "Chat with us");
           setPlaceholderText(widgetRes.data.placeholder_text || "Type your message...");
           setIsWidgetEnabled(widgetRes.data.is_enabled);
@@ -89,7 +91,7 @@ export default function ApplicationDetail() {
           }
           setWidgetCfg(null);
           setGreetingMsg("");
-          setThemeColor("#00D4FF");
+          setWidgetTheme("light");
           setLauncherLabel("Chat with us");
           setPlaceholderText("Type your message...");
           setIsWidgetEnabled(true);
@@ -174,7 +176,7 @@ export default function ApplicationDetail() {
         // Update existing widget
         await apiClient.put(`/admin/widgets/${widgetCfg.id}`, {
           display_name: widgetCfg.display_name,
-          theme: themeColor.startsWith("#") ? "light" : themeColor,
+          theme: widgetTheme,
           launcher_label: launcherLabel,
           welcome_message: greetingMsg,
           placeholder_text: placeholderText,
@@ -186,7 +188,7 @@ export default function ApplicationDetail() {
           await apiClient.post("/admin/widgets", {
             application_id: id,
             display_name: app?.name || "Support Widget",
-            theme: themeColor.startsWith("#") ? "light" : themeColor,
+            theme: widgetTheme,
             launcher_label: launcherLabel,
             welcome_message: greetingMsg,
             placeholder_text: placeholderText,
@@ -197,7 +199,7 @@ export default function ApplicationDetail() {
             const existing = await apiClient.get(`/admin/widgets/application/${id}`);
             await apiClient.put(`/admin/widgets/${existing.data.id}`, {
               display_name: existing.data.display_name || app?.name || "Support Widget",
-              theme: themeColor.startsWith("#") ? "light" : themeColor,
+              theme: widgetTheme,
               launcher_label: launcherLabel,
               welcome_message: greetingMsg,
               placeholder_text: placeholderText,
@@ -436,6 +438,10 @@ export default function ApplicationDetail() {
   // Widget URL - for development use localhost:5173, for production use the same origin as the admin page
   const FRONTEND_URL = import.meta.env.VITE_FRONTEND_URL || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : "http://localhost:5173");
   
+  // Preview color mapping for the live widget preview panel.
+  const previewColor = widgetTheme === "dark" ? "#1a1a1a" : "#00D4FF";
+  const previewHeaderTextColor = widgetTheme === "dark" ? "#ffffff" : "#040914";
+
   const embedSnippetHtml = widgetCfg ? `<!-- OceanRAG Embeddable Widget Snippet -->
 <script>
   // SECURITY: widgetKey is the only credential needed for authentication
@@ -973,8 +979,8 @@ export default function ApplicationDetail() {
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Theme</label>
                       <select
-                        value={themeColor.startsWith("#") ? "light" : themeColor}
-                        onChange={(e) => setThemeColor(e.target.value)}
+                        value={widgetTheme}
+                        onChange={(e) => setWidgetTheme(e.target.value)}
                         className="w-full bg-[#0B1221] border border-white/10 focus:border-[#00D4FF] text-white text-xs rounded-xl px-4 py-2.5 outline-none focus:ring-1 focus:ring-[#00D4FF] transition"
                       >
                         <option value="light">Light</option>
@@ -1084,7 +1090,7 @@ export default function ApplicationDetail() {
                   {/* Fake widget top bar */}
                   <div
                     className="p-3 text-xs text-[#040914] font-bold flex items-center justify-between"
-                    style={{ backgroundColor: themeColor }}
+                    style={{ backgroundColor: previewColor, color: previewHeaderTextColor }}
                   >
                     <span className="tracking-tight truncate">{app.name}</span>
                     <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
@@ -1107,7 +1113,7 @@ export default function ApplicationDetail() {
                     </div>
                     <div
                       className="h-6 w-12 rounded-lg flex items-center justify-center text-[9px] font-bold text-center"
-                      style={{ backgroundColor: themeColor, color: "#040914" }}
+                      style={{ backgroundColor: previewColor, color: previewHeaderTextColor }}
                     >
                       SEND
                     </div>
@@ -1116,7 +1122,7 @@ export default function ApplicationDetail() {
                   {/* Widget Launch Circle */}
                   <div
                     className={`absolute bottom-4 right-4 h-11 w-11 rounded-full flex items-center justify-center text-lg shadow-xl border border-white/10`}
-                    style={{ backgroundColor: themeColor, color: "#040914" }}
+                    style={{ backgroundColor: previewColor, color: previewHeaderTextColor }}
                   >
                     💬
                   </div>
