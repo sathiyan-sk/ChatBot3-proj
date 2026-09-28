@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,6 +15,43 @@ from app.composition import build_application_container
 from app.config.settings import get_settings
 from app.infrastructure.db.session import create_session_factory
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
+from app.modules.conversations.infrastructure.repositories import (
+    SqlAlchemyConversationRepository,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _cleanup_expired_conversations(session_factory, default_retention_days: int) -> int:
+    session = session_factory()
+    try:
+        deleted_count = SqlAlchemyConversationRepository(
+            session
+        ).delete_expired_conversations(
+            default_retention_days=default_retention_days,
+        )
+        session.commit()
+        return deleted_count
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+async def _run_retention_cleanup(session_factory, default_retention_days: int) -> None:
+    while True:
+        await asyncio.sleep(60 * 60)
+        try:
+            deleted_count = await asyncio.to_thread(
+                _cleanup_expired_conversations,
+                session_factory,
+                default_retention_days,
+            )
+            if deleted_count:
+                logger.info("Removed %s expired conversations", deleted_count)
+        except Exception:
+            logger.exception("Scheduled conversation-retention cleanup failed")
 
 
 def create_lifespan(settings, session_factory):
@@ -38,7 +77,32 @@ def create_lifespan(settings, session_factory):
             get_knowledge_ingestion_pipeline
         )
 
-        yield
+        try:
+            deleted_count = await asyncio.to_thread(
+                _cleanup_expired_conversations,
+                session_factory,
+                settings.chat_history_retention_days,
+            )
+            if deleted_count:
+                logger.info("Removed %s expired conversations at startup", deleted_count)
+        except Exception:
+            logger.exception("Startup conversation-retention cleanup failed")
+
+        retention_task = asyncio.create_task(
+            _run_retention_cleanup(
+                session_factory,
+                settings.chat_history_retention_days,
+            )
+        )
+
+        try:
+            yield
+        finally:
+            retention_task.cancel()
+            try:
+                await retention_task
+            except asyncio.CancelledError:
+                pass
     
     return lifespan
 

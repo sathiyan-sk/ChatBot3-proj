@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.dependencies import require_admin
 
 from app.api.admin.applications import router as admin_applications_router
 from app.api.admin.conversations import router as admin_conversations_router
@@ -21,17 +23,41 @@ from app.api.system import router as system_router
 
 api_router = APIRouter(prefix="/api")
 
-api_router.include_router(admin_applications_router)
-api_router.include_router(admin_knowledge_bases_router)
-api_router.include_router(admin_documents_router)
-api_router.include_router(admin_ingestion_router)
-api_router.include_router(admin_settings_router)
-api_router.include_router(admin_conversations_router)
+_admin_dependencies = [Depends(require_admin)]
+
+api_router.include_router(
+    admin_applications_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_knowledge_bases_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_documents_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_ingestion_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_settings_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_conversations_router,
+    dependencies=_admin_dependencies,
+)
 api_router.include_router(client_chat_router)
 api_router.include_router(client_conversations_router)
 api_router.include_router(
     admin_conversation_debug_router,
+    dependencies=_admin_dependencies,
 )
-api_router.include_router(admin_widgets_router)
+api_router.include_router(
+    admin_widgets_router,
+    dependencies=_admin_dependencies,
+)
 api_router.include_router(client_widget_router)
 api_router.include_router(system_router)

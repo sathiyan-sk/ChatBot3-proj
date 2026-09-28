@@ -10,5 +10,6 @@ class LlmContract(ABC):
         *,
         system_prompt: str,
         user_prompt: str,
+        temperature: float | None = None,
     ) -> str:
         raise NotImplementedError

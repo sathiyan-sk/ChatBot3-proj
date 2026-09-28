@@ -99,28 +99,16 @@ admin_security = HTTPBasic()
 
 
 def require_admin(
-    request: Request,
     credentials: HTTPBasicCredentials = Depends(admin_security),
 ) -> None:
-    settings = request.app.state.settings
+    expected_username = os.getenv("ADMIN_USERNAME", "").strip()
+    expected_password = os.getenv("ADMIN_PASSWORD", "")
 
-    security_settings = getattr(
-        settings,
-        "security",
-        None,
-    )
-
-    expected_username = getattr(
-        security_settings,
-        "admin_username",
-        os.getenv("ADMIN_USERNAME", "admin"),
-    )
-
-    expected_password = getattr(
-        security_settings,
-        "admin_password",
-        os.getenv("ADMIN_PASSWORD", "change-this-password"),
-    )
+    if not expected_username or not expected_password:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin authentication is not configured.",
+        )
 
     username_valid = secrets.compare_digest(
         credentials.username,
@@ -343,6 +331,9 @@ def get_chat_application_service(
             SqlAlchemyDocumentRepository(
                 session=session,
             )
+        ),
+        settings_repository=SqlAlchemySettingsRepository(
+            session=session,
         ),
         conversation_service=conversation_service,
         question_answering_pipeline=(

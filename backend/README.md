@@ -37,6 +37,13 @@ CORS_ALLOW_LOCAL_ORIGINS=false
 so the deployed admin frontend can call the API. `ALLOWED_ORIGINS` may also
 contain additional first-party origins separated by commas.
 
+Set `CHAT_HISTORY_RETENTION_DAYS` on the backend service to choose the default
+message-history retention for newly created applications (defaults to `30`).
+Each application's `retention_days` setting overrides that default. Expired
+conversations and their messages are removed at startup and hourly; a visitor's
+history is also cleaned against its application's exact retention cutoff when
+the widget session is opened.
+
 Embedded customer sites are configured separately in the application's
 `allowed_origins` field in the admin UI. Add the complete origin, for example
 `https://customer.example.com`, without a trailing slash or path. Do not add

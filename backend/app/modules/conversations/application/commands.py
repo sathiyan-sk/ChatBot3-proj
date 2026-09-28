@@ -8,6 +8,7 @@ class ResolveConversationCommand:
     application_id: str
     conversation_identity: str
     title: str | None = None
+    inactivity_timeout_minutes: int | None = None
 
 
 @dataclass(slots=True, frozen=True)

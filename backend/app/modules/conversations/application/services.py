@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from app.core.exceptions import ApplicationError
 from app.modules.conversations.application.commands import (
@@ -36,6 +37,17 @@ class ConversationApplicationService:
     conversation_repository: ConversationRepositoryInterface
     message_repository: MessageRepositoryInterface
 
+    def cleanup_expired_conversations(
+        self,
+        *,
+        default_retention_days: int,
+        application_id: str | None = None,
+    ) -> int:
+        return self.conversation_repository.delete_expired_conversations(
+            default_retention_days=default_retention_days,
+            application_id=application_id,
+        )
+
     def resolve_conversation(self, command: ResolveConversationCommand) -> ConversationDto:
         identity = ConversationIdentity(command.conversation_identity)
 
@@ -44,7 +56,23 @@ class ConversationApplicationService:
             conversation_identity=identity.value,
         )
         if existing_conversation is not None:
-            return self._to_conversation_dto(existing_conversation)
+            timeout = command.inactivity_timeout_minutes
+            if timeout is None:
+                return self._to_conversation_dto(existing_conversation)
+
+            last_activity = existing_conversation.updated_at
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+
+            if datetime.now(timezone.utc) - last_activity < timedelta(minutes=timeout):
+                return self._to_conversation_dto(existing_conversation)
+
+            self.conversation_repository.update(
+                conversation_id=existing_conversation.id,
+                title=existing_conversation.title,
+                summary=existing_conversation.summary,
+                is_active=False,
+            )
 
         created_conversation = self.conversation_repository.create(
             application_id=command.application_id,
@@ -81,6 +109,7 @@ class ConversationApplicationService:
             sequence_number=next_sequence_number,
             citation_payload=command.citation_payload,
         )
+        self.conversation_repository.touch_activity(conversation.id)
         return self._to_message_dto(created_message)
 
     def get_conversation_detail(

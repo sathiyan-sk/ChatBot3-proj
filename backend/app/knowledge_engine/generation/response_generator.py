@@ -17,8 +17,10 @@ class ResponseGenerator:
         system_prompt: str,
         user_prompt: str,
         conversation_context: list[dict[str, str]] | None = None,
+        temperature: float | None = None,
     ) -> str:
         return self.llm_contract.generate(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            temperature=temperature,
         )

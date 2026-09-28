@@ -69,6 +69,7 @@ def create_chat_message(
             conversation_title=(
                 request.conversation_title
             ),
+            top_k=request.top_k,
         )
     )
 
@@ -117,6 +118,7 @@ def create_widget_chat_message(
             conversation_title=(
                 request.conversation_title
             ),
+            top_k=request.top_k,
         )
     )
 

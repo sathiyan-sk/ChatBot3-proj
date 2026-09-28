@@ -18,6 +18,7 @@ class OpenRouterLlmProvider(LlmProvider):
         *,
         system_prompt: str,
         user_prompt: str,
+        temperature: float | None = None,
     ) -> str:
         normalized_system = system_prompt.strip()
         normalized_user = user_prompt.strip()
@@ -64,12 +65,10 @@ class OpenRouterLlmProvider(LlmProvider):
                 status_code=500,
             )
 
-        temperature = float(
-            getattr(
-                self.settings,
-                "temperature",
-                0.2,
-            )
+        effective_temperature = (
+            temperature
+            if temperature is not None
+            else float(getattr(self.settings, "temperature", 0.2))
         )
 
         messages: list[dict[str, str]] = []
@@ -98,7 +97,7 @@ class OpenRouterLlmProvider(LlmProvider):
             payload = {
                 "model": model,
                 "messages": messages,
-                "temperature": temperature,
+                "temperature": effective_temperature,
                 "stream": False,
             }
 

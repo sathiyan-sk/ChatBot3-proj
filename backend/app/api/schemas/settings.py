@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class CreateSettingsRequest(BaseModel):
     application_id: str = Field(..., min_length=1)
-    llm_temperature: str = Field(default="0.2", min_length=1, max_length=20)
+    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_context_messages: int = Field(default=12, ge=1, le=100)
     inactivity_timeout_minutes: int = Field(default=30, ge=1, le=10080)
     retention_days: int = Field(default=30, ge=1, le=3650)
@@ -15,7 +15,7 @@ class CreateSettingsRequest(BaseModel):
 
 
 class UpdateSettingsRequest(BaseModel):
-    llm_temperature: str = Field(..., min_length=1, max_length=20)
+    llm_temperature: float = Field(..., ge=0.0, le=2.0)
     max_context_messages: int = Field(..., ge=1, le=100)
     inactivity_timeout_minutes: int = Field(..., ge=1, le=10080)
     retention_days: int = Field(..., ge=1, le=3650)

@@ -35,7 +35,17 @@ function AppContent() {
 
   return (
     <>
-      <Toaster richColors closeButton theme="dark" />
+      <Toaster
+        richColors
+        closeButton
+        theme="dark"
+        position="top-right"
+        offset={{ top: 88, right: 24 }}
+        mobileOffset={{ top: 76, right: 12 }}
+      />
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
       <Navbar onLogout={handleLogout} />
       <Routes>
         <Route path="/login" element={<Login onLoginSuccess={handleLoginSuccess} />} />

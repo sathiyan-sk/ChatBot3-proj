@@ -26,11 +26,11 @@ def create_settings(
     result = service.create(
         CreateSettingsCommand(
             application_id=request.application_id,
-            conversation_inactivity_minutes=request.conversation_inactivity_minutes,
-            conversation_retention_days=request.conversation_retention_days,
-            retrieval_top_k=request.retrieval_top_k,
-            reranker_enabled=request.reranker_enabled,
-            citations_enabled=request.citations_enabled,
+            llm_temperature=str(request.llm_temperature),
+            max_context_messages=request.max_context_messages,
+            inactivity_timeout_minutes=request.inactivity_timeout_minutes,
+            retention_days=request.retention_days,
+            prompt_system_template=request.prompt_system_template,
         )
     )
     return SettingsResponse.model_validate(asdict(result))
@@ -58,11 +58,11 @@ def update_settings(
     result = service.update(
         UpdateSettingsCommand(
             application_id=application_id,
-            conversation_inactivity_minutes=request.conversation_inactivity_minutes,
-            conversation_retention_days=request.conversation_retention_days,
-            retrieval_top_k=request.retrieval_top_k,
-            reranker_enabled=request.reranker_enabled,
-            citations_enabled=request.citations_enabled,
+            llm_temperature=str(request.llm_temperature),
+            max_context_messages=request.max_context_messages,
+            inactivity_timeout_minutes=request.inactivity_timeout_minutes,
+            retention_days=request.retention_days,
+            prompt_system_template=request.prompt_system_template,
         )
     )
     return SettingsResponse.model_validate(asdict(result))

@@ -10,7 +10,7 @@
    * 2. Backend resolves application from widget key via X-Widget-Key header
    * 3. Backend enforces origin validation (Origin header check against allowed_origins)
    * 4. Backend enforces rate limiting
-   * 5. Conversation identity is browser-generated, stored in sessionStorage (per-tab)
+  * 5. Conversation identity is browser-generated and stored per widget in client-site localStorage
    * 6. Widget key visibility in DevTools/network requests is expected and secure
    * 7. appId is for reference/debugging only - NOT used for security/authorization
    * 8. Secret application credentials (akp_xxx) NEVER exposed to browser
@@ -57,21 +57,47 @@
   let titleEl = null;
   let unreadBadge = null;
 
-  // Generate or retrieve conversation identity from sessionStorage
+  // Keep a stable visitor identity across visits, scoped to this widget.
   function getConversationIdentity() {
-    let identity = sessionStorage.getItem("oceanrag_conversation_identity");
-    if (!identity) {
-      // SECURITY: appId is NOT included in identity - backend resolves application from widget key
-      identity = "widget-" + Date.now() + "-" + Math.random().toString(36).substring(2, 15);
-      sessionStorage.setItem("oceanrag_conversation_identity", identity);
+    const storageKey = `oceanrag_conversation_identity:${WIDGET_PUBLIC_KEY}`;
+    try {
+      let identity = localStorage.getItem(storageKey);
+      if (!identity) {
+        identity = sessionStorage.getItem("oceanrag_conversation_identity");
+      }
+      if (!identity) {
+        identity = `widget-${window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+      }
+      localStorage.setItem(storageKey, identity);
+      return identity;
+    } catch {
+      try {
+        let identity = sessionStorage.getItem(storageKey);
+        if (!identity) {
+          identity = `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          sessionStorage.setItem(storageKey, identity);
+        }
+        return identity;
+      } catch {
+        return `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
     }
-    return identity;
   }
 
   // Strip bracketed citation markers like [1], [4], [10] that the LLM
   // sometimes appends to answers - end users don't need them.
   function stripCitationMarkers(text) {
     return String(text || "").replace(/\s*\[\d+\]/g, "");
+  }
+
+  function escapeHtml(text) {
+    return String(text || "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[character]);
   }
 
   function formatTime(date) {
@@ -128,12 +154,13 @@
     bubble.className = "oceanrag-bubble";
 
     // Simulate formatting: **bold** then newlines
-    let formattedText = stripCitationMarkers(text).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    let formattedText = escapeHtml(stripCitationMarkers(text))
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
     bubble.innerHTML = formattedText.split("\n").join("<br/>");
 
     const time = document.createElement("span");
     time.className = "oceanrag-msg-time";
-    time.textContent = formatTime(new Date());
+    time.textContent = formatTime(opts.createdAt ? new Date(opts.createdAt) : new Date());
     time.setAttribute("aria-hidden", "true");
 
     row.appendChild(bubble);
@@ -325,11 +352,47 @@
     titleEl.textContent = headerTitle;
     textInput.placeholder = placeholderText;
 
-    // Initialize conversation identity
+    // Restore retained visitor history or create the visitor's first conversation.
     conversationIdentity = getConversationIdentity();
+    textInput.disabled = true;
+    const sendButton = document.getElementById("oceanrag-send-btn");
+    if (sendButton) sendButton.disabled = true;
 
-    // Welcome Greeting Prompt (silent: never triggers the unread badge)
-    addMessage(greetingMessage, "bot", { silent: true });
+    try {
+      const sessionResponse = await fetch(`${API_URL}/api/client/widget/session`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Widget-Key": WIDGET_PUBLIC_KEY,
+        },
+        body: JSON.stringify({ conversation_identity: conversationIdentity }),
+      });
+
+      if (sessionResponse.ok) {
+        const session = await sessionResponse.json();
+        conversationId = session.conversation_id || null;
+        if (session.messages?.length) {
+          for (const message of session.messages) {
+            addMessage(message.content, message.role === "user" ? "user" : "bot", {
+              createdAt: message.created_at,
+              silent: true,
+            });
+          }
+        }
+      } else {
+        console.warn("OceanRAG Widget: Could not restore conversation history.");
+      }
+    } catch (error) {
+      console.warn("OceanRAG Widget: Could not restore conversation history.", error);
+    }
+
+    if (!messagesBox.children.length) {
+      addMessage(greetingMessage, "bot", { silent: true });
+    }
+    textInput.disabled = false;
+    if (sendButton) sendButton.disabled = false;
+    messagesBox.scrollTop = messagesBox.scrollHeight;
   }
 
   loadWidgetSettings();

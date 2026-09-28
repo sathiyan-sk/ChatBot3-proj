@@ -35,7 +35,10 @@ class QuestionAnsweringPipeline:
         self,
         request: QuestionAnsweringPipelineRequest,
     ) -> QuestionAnsweringPipelineResult:
-        conversation_context = self.conversation_context_builder.build(request.messages)
+        conversation_context = self.conversation_context_builder.build(
+            request.messages,
+            max_messages=request.max_context_messages,
+        )
         query_embedding = self.query_embedder.embed(request.query_text)
 
         # Retrieve MORE chunks initially for better coverage
@@ -58,10 +61,12 @@ class QuestionAnsweringPipeline:
         reranked_chunks = self.reranker.rerank(
             query_text=request.query_text,
             chunks=filtered_chunks,
-            top_k=10,
+            top_k=request.top_k,
         )
 
-        system_prompt = self.prompt_builder.build_system_prompt()
+        system_prompt = self.prompt_builder.build_system_prompt(
+            request.prompt_system_template,
+        )
         user_prompt = self.prompt_builder.build_user_prompt(
             query_text=request.query_text,
             conversation_messages=conversation_context,
@@ -71,6 +76,7 @@ class QuestionAnsweringPipeline:
         answer_text = self.response_generator.generate(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            temperature=request.llm_temperature,
         )
         citations = self.citation_builder.build(reranked_chunks)
 

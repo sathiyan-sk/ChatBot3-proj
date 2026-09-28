@@ -140,7 +140,9 @@
   transform-origin: bottom right;
   transition: opacity 0.28s cubic-bezier(0.075, 0.82, 0.165, 1),
               transform 0.28s cubic-bezier(0.075, 0.82, 0.165, 1);
-  z-index: 999998;
+  /* Panel must sit ABOVE the launcher so the launcher (and its close
+     icon) never covers the input / send controls when they intersect. */
+  z-index: 1000000;
 }
 .oceanrag-hidden {
   opacity: 0;
@@ -390,6 +392,13 @@
     /* 44px minimum touch target */
     height: 52px;
     width: 52px;
+  }
+
+  /* On mobile the panel is a full-screen sheet, so hide the floating
+     launcher while open to avoid it overlapping the input footer.
+     The header's close (x) button remains available to dismiss. */
+  .oceanrag-launcher.oceanrag-launcher-open {
+    display: none;
   }
 
   .oceanrag-chatbox {

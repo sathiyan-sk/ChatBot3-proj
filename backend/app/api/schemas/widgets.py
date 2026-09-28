@@ -90,3 +90,18 @@ class PublicWidgetConfigurationResponse(BaseModel):
     welcome_message: str | None
     placeholder_text: str | None
     is_enabled: bool
+
+
+class WidgetSessionRequest(BaseModel):
+    conversation_identity: str = Field(..., min_length=1, max_length=255)
+
+
+class WidgetSessionMessage(BaseModel):
+    role: str
+    content: str
+    created_at: datetime
+
+
+class WidgetSessionResponse(BaseModel):
+    conversation_id: str
+    messages: list[WidgetSessionMessage] = Field(default_factory=list)

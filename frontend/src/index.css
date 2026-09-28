@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/* ============================================================
+   DESIGN TOKENS - single source of truth for color, radius and
+   elevation. Tailwind v4 @theme exposes these as utilities, e.g.
+   bg-surface / text-ink / rounded-card / shadow-raised
+   ============================================================ */
+@theme {
+  /* Brand + surfaces */
+  --color-accent: #00D4FF;
+  --color-accent-strong: #2563EB;
+  --color-ink: #040914;
+  --color-surface: #0B1221;
+  --color-surface-inset: #070D19;
+
+  /* Semantic status colors */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+
+  /* Radius: exactly two values keeps the UI coherent */
+  --radius-control: 12px;
+  --radius-card: 16px;
+
+  /* Elevation: exactly three levels */
+  --shadow-flat: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-raised: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-overlay: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
+}
+
 :root {
   --color-cyan: #00D4FF;
   --color-blue: #2563EB;
@@ -21,6 +49,77 @@ body {
   width: 100%;
 }
 
+
+/* ============================================================
+   TYPE SCALE - five locked steps replacing the ad-hoc
+   text-[9px]..text-4xl scatter so hierarchy reads consistently.
+   ============================================================ */
+@layer components {
+  .text-eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em];
+  }
+  .text-page-title {
+    @apply text-[26px] md:text-[30px] font-semibold tracking-tight;
+  }
+  .text-card-title {
+    @apply text-[15px] font-semibold tracking-tight;
+  }
+  .text-body {
+    @apply text-[13px] leading-relaxed;
+  }
+  .text-meta {
+    @apply text-[11px] font-medium;
+  }
+
+  /* Standard container used by every card / panel */
+  .surface-card {
+    @apply bg-white/[0.03] border border-white/[0.08] rounded-card;
+  }
+
+  /* Opaque elevated surface for floating layers (menus, modals,
+     dialogs). Solid fill so options never bleed into content. */
+  .surface-elevated {
+    @apply bg-[#0D1526] border border-white/[0.10] rounded-card;
+  }
+
+  /* Inset wells for inputs, code blocks, drop zones */
+  .surface-inset {
+    @apply bg-surface border border-white/[0.08];
+  }
+
+  /* Hairline separator */
+  .divider {
+    @apply border-white/[0.07];
+  }
+}
+
+/* Native select option lists render in the OS layer, so give them
+   an opaque background + readable text instead of the translucent
+   control background. */
+select option {
+  background-color: #0d1526;
+  color: #e2e8f0;
+}
+
+/* Accessibility: skip link is hidden until it receives keyboard focus */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 10px;
+  background-color: #00d4ff;
+  color: #040914;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
 /* Custom utility classes (Tailwind v4 @utility syntax) */
 @utility glassmorphism {
   background: rgba(11, 18, 33, 0.6);
@@ -36,6 +135,21 @@ body {
   animation: fadeIn 0.3s ease-in;
 }
 
+@utility animate-scaleIn {
+  animation: scaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@utility shimmer {
+  animation: shimmer 1.6s linear infinite;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.09) 40%,
+    rgba(255, 255, 255, 0.04) 80%
+  );
+  background-size: 200% 100%;
+}
+
 /* @keyframes MUST live at the top level, not nested inside @utility */
 @keyframes fadeIn {
   from {
@@ -45,5 +159,36 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

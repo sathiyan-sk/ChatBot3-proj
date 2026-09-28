@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.infrastructure.db.models.application_model import ApplicationModel
 from app.infrastructure.db.models.conversation_model import (
     ConversationModel,
 )
 from app.infrastructure.db.models.message_model import (
     MessageModel,
 )
+from app.infrastructure.db.models.settings_model import SettingsModel
 from app.modules.conversations.domain.entities import (
     Conversation,
     Message,
@@ -230,6 +234,49 @@ class SqlAlchemyConversationRepository(
         return map_conversation_model_to_entity(
             model,
         )
+
+    def touch_activity(self, conversation_id: str) -> None:
+        model = self._session.execute(
+            select(ConversationModel).where(
+                ConversationModel.id == conversation_id,
+            )
+        ).scalar_one()
+        model.updated_at = datetime.now(timezone.utc)
+        self._session.flush()
+
+    def delete_expired_conversations(
+        self,
+        *,
+        default_retention_days: int,
+        application_id: str | None = None,
+    ) -> int:
+        retention_query = select(
+            ApplicationModel.id,
+            SettingsModel.retention_days,
+        ).outerjoin(
+                SettingsModel,
+                SettingsModel.application_id == ApplicationModel.id,
+        )
+        if application_id is not None:
+            retention_query = retention_query.where(
+                ApplicationModel.id == application_id
+            )
+        retention_rows = self._session.execute(retention_query).all()
+        now = datetime.now(timezone.utc)
+        deleted_count = 0
+
+        for application_id, configured_days in retention_rows:
+            retention_days = configured_days or default_retention_days
+            cutoff = now - timedelta(days=retention_days)
+            result = self._session.execute(
+                delete(ConversationModel).where(
+                    ConversationModel.application_id == application_id,
+                    ConversationModel.updated_at < cutoff,
+                )
+            )
+            deleted_count += result.rowcount or 0
+
+        return deleted_count
 
 
 class SqlAlchemyMessageRepository(

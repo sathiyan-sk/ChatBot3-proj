@@ -17,12 +17,14 @@ from app.modules.conversations.application.queries import GetConversationDetailQ
 from app.modules.conversations.application.services import ConversationApplicationService
 from app.modules.documents.domain.repository_interfaces import DocumentRepositoryInterface
 from app.modules.knowledge_bases.domain.repository_interfaces import KnowledgeBaseRepositoryInterface
+from app.modules.settings.domain.repository_interfaces import SettingsRepositoryInterface
 
 
 @dataclass(slots=True)
 class ChatApplicationService:
     knowledge_base_repository: KnowledgeBaseRepositoryInterface
     document_repository: DocumentRepositoryInterface
+    settings_repository: SettingsRepositoryInterface
     conversation_service: ConversationApplicationService
     question_answering_pipeline: QuestionAnsweringPipeline
 
@@ -60,11 +62,20 @@ class ChatApplicationService:
                 status_code=409,
             )
 
+        application_settings = self.settings_repository.get_by_application_id(
+            command.application_id
+        )
+
         conversation = self.conversation_service.resolve_conversation(
             ResolveConversationCommand(
                 application_id=command.application_id,
                 conversation_identity=command.conversation_identity,
                 title=command.conversation_title,
+                inactivity_timeout_minutes=(
+                    application_settings.inactivity_timeout_minutes
+                    if application_settings is not None
+                    else 30
+                ),
             )
         )
 
@@ -99,6 +110,22 @@ class ChatApplicationService:
                     {"role": item.role, "content": item.content}
                     for item in conversation_detail.messages
                 ],
+                top_k=command.top_k,
+                max_context_messages=(
+                    application_settings.max_context_messages
+                    if application_settings is not None
+                    else 12
+                ),
+                llm_temperature=(
+                    float(application_settings.llm_temperature)
+                    if application_settings is not None
+                    else None
+                ),
+                prompt_system_template=(
+                    application_settings.prompt_system_template
+                    if application_settings is not None
+                    else None
+                ),
             )
         )
 

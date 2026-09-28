@@ -64,6 +64,19 @@ class ConversationRepositoryInterface(ABC):
     ) -> Conversation:
         raise NotImplementedError
 
+    @abstractmethod
+    def touch_activity(self, conversation_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_expired_conversations(
+        self,
+        *,
+        default_retention_days: int,
+        application_id: str | None = None,
+    ) -> int:
+        raise NotImplementedError
+
 
 class MessageRepositoryInterface(ABC):
     @abstractmethod

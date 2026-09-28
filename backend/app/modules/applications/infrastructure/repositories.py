@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -123,12 +125,16 @@ class ApplicationProvisioningSqlAlchemyRepository(ApplicationProvisioningReposit
         self._session.flush()
 
     def create_default_settings(self, *, application_id: str) -> None:
+        default_retention_days = max(
+            1,
+            int(os.getenv("CHAT_HISTORY_RETENTION_DAYS", "30")),
+        )
         model = SettingsModel(
             application_id=application_id,
             llm_temperature="0.2",
             max_context_messages=12,
             inactivity_timeout_minutes=30,
-            retention_days=30,
+            retention_days=default_retention_days,
             prompt_system_template=None,
         )
         self._session.add(model)

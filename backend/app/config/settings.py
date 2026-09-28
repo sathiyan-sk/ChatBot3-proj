@@ -87,6 +87,7 @@ class Settings:
     # database (applications.allowed_origins) by DynamicCorsMiddleware.
     cors_allowed_origins: tuple[str, ...] = ()
     cors_allow_local_origins: bool = True
+    chat_history_retention_days: int = 30
 
 def load_settings() -> Settings:
     provider_timeout_seconds = float(
@@ -284,6 +285,10 @@ def load_settings() -> Settings:
             "true",
         ).strip().lower()
         in {"1", "true", "yes"},
+        chat_history_retention_days=max(
+            1,
+            int(os.getenv("CHAT_HISTORY_RETENTION_DAYS", "30")),
+        ),
     )
 
 
