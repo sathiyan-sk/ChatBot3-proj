@@ -88,6 +88,7 @@ class Settings:
     cors_allowed_origins: tuple[str, ...] = ()
     cors_allow_local_origins: bool = True
     chat_history_retention_days: int = 30
+    ingestion_stale_after_minutes: int = 120
 
 def load_settings() -> Settings:
     provider_timeout_seconds = float(
@@ -288,6 +289,10 @@ def load_settings() -> Settings:
         chat_history_retention_days=max(
             1,
             int(os.getenv("CHAT_HISTORY_RETENTION_DAYS", "30")),
+        ),
+        ingestion_stale_after_minutes=max(
+            1,
+            int(os.getenv("INGESTION_STALE_AFTER_MINUTES", "120")),
         ),
     )
 

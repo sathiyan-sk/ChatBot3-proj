@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID as PyUUID
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     ForeignKey,
     Index,
@@ -89,6 +90,24 @@ class WidgetModel(
     placeholder_text: Mapped[str | None] = (
         mapped_column(
             String(255),
+            nullable=True,
+        )
+    )
+
+    # Optional accent colour (hex, e.g. "#00D4FF") applied to the launcher,
+    # send button and (in light theme) the header. None => use theme default.
+    accent_color: Mapped[str | None] = (
+        mapped_column(
+            String(20),
+            nullable=True,
+        )
+    )
+
+    # Ordered list of starter prompt chips shown above the input so visitors
+    # can begin a conversation with one tap.
+    starter_prompts: Mapped[list[str] | None] = (
+        mapped_column(
+            ARRAY(String),
             nullable=True,
         )
     )

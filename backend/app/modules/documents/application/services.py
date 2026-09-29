@@ -42,7 +42,7 @@ class DocumentApplicationService:
 
     _ALLOWED_TRANSITIONS: ClassVar[dict[str, set[str]]] = {
         "pending": {"processing", "failed", "archived"},
-        "processing": {"ready", "failed", "archived"},
+        "processing": {"processing", "ready", "failed", "archived"},
         "ready": {"archived", "processing"},
         "failed": {"processing", "archived"},
         "archived": set(),

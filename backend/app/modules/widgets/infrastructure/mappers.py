@@ -18,6 +18,8 @@ def map_widget_model_to_entity(
         launcher_label=model.launcher_label,
         welcome_message=model.welcome_message,
         placeholder_text=model.placeholder_text,
+        accent_color=model.accent_color,
+        starter_prompts=model.starter_prompts,
         is_enabled=model.is_enabled,
         created_at=model.created_at,
         updated_at=model.updated_at,

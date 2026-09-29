@@ -39,6 +39,8 @@ class SqlAlchemyWidgetRepository(
         launcher_label: str | None,
         welcome_message: str | None,
         placeholder_text: str | None,
+        accent_color: str | None,
+        starter_prompts: list[str] | None,
         is_enabled: bool,
     ) -> Widget:
         model = WidgetModel(
@@ -51,6 +53,8 @@ class SqlAlchemyWidgetRepository(
             launcher_label=launcher_label,
             welcome_message=welcome_message,
             placeholder_text=placeholder_text,
+            accent_color=accent_color,
+            starter_prompts=starter_prompts,
             is_enabled=is_enabled,
         )
 
@@ -127,6 +131,8 @@ class SqlAlchemyWidgetRepository(
         launcher_label: str | None,
         welcome_message: str | None,
         placeholder_text: str | None,
+        accent_color: str | None,
+        starter_prompts: list[str] | None,
         is_enabled: bool,
     ) -> Widget:
         statement = select(WidgetModel).where(
@@ -147,6 +153,8 @@ class SqlAlchemyWidgetRepository(
         model.launcher_label = launcher_label
         model.welcome_message = welcome_message
         model.placeholder_text = placeholder_text
+        model.accent_color = accent_color
+        model.starter_prompts = starter_prompts
         model.is_enabled = is_enabled
 
         self._session.flush()

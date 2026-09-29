@@ -15,6 +15,8 @@ class WidgetDto:
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
+    accent_color: str | None
+    starter_prompts: list[str] | None
     is_enabled: bool
     created_at: datetime
     updated_at: datetime

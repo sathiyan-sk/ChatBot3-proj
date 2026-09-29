@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import (
     APIRouter,
@@ -378,12 +379,33 @@ def start_ingestion(
             request=request,
             session=session,
         )
+        document = document_service.get_by_id(
+            GetDocumentByIdQuery(
+                document_id=payload.document_id,
+            )
+        )
+        if document.status == "processing":
+            last_updated = document.updated_at
+            if last_updated.tzinfo is None:
+                last_updated = last_updated.replace(tzinfo=timezone.utc)
+            stale_after = request.app.state.settings.ingestion_stale_after_minutes
+            if datetime.now(timezone.utc) - last_updated < timedelta(minutes=stale_after):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "document_ingestion_already_running",
+                        "message": "This document is already processing. Retry after the configured stale-job timeout if it remains stuck.",
+                    },
+                )
         document_service.mark_processing(
             MarkDocumentProcessingCommand(
                 document_id=payload.document_id,
             )
         )
         session.commit()
+    except HTTPException:
+        _safe_rollback(session)
+        raise
     except Exception as exc:
         logger.exception(
             "Manual document ingestion failed before background scheduling",

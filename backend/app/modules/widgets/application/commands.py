@@ -12,6 +12,8 @@ class CreateWidgetCommand:
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
+    accent_color: str | None
+    starter_prompts: list[str] | None
     is_enabled: bool
 
 
@@ -23,4 +25,6 @@ class UpdateWidgetCommand:
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
+    accent_color: str | None
+    starter_prompts: list[str] | None
     is_enabled: bool

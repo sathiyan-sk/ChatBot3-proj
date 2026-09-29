@@ -43,6 +43,8 @@
   let greetingMessage = "Hello! Ask me any questions about our policies.";
   let placeholderText = "Type your message...";
   let headerTitle = "Chat Assistant";
+  let accentColor = null;
+  let starterPrompts = [];
   let conversationIdentity = null;
   let conversationId = null;
   let unreadCount = 0;
@@ -56,6 +58,38 @@
   let messagesBox = null;
   let titleEl = null;
   let unreadBadge = null;
+  let starterPromptsBox = null;
+
+  // Return the best-contrast text colour (dark or light) for a hex background.
+  function readableTextOn(hex) {
+    const safe = String(hex || "").trim().replace(/^#/, "");
+    const expanded = safe.length === 3
+      ? safe.split("").map((c) => c + c).join("")
+      : safe;
+    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return "#040914";
+    const r = parseInt(expanded.slice(0, 2), 16) / 255;
+    const g = parseInt(expanded.slice(2, 4), 16) / 255;
+    const b = parseInt(expanded.slice(4, 6), 16) / 255;
+    const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    return luminance > 0.55 ? "#040914" : "#FFFFFF";
+  }
+
+  // Apply the admin's custom accent colour by overriding the theme CSS
+  // variables on the widget root. Falls back to the theme defaults when unset.
+  function applyAccentColor() {
+    const root = document.getElementById("oceanrag-widget-root");
+    if (!root || !accentColor) return;
+    const contrast = readableTextOn(accentColor);
+    root.style.setProperty("--oceanrag-accent", accentColor);
+    root.style.setProperty("--oceanrag-accent-contrast", contrast);
+    // In light theme the header uses the accent as its background; mirror the
+    // admin preview. Dark theme keeps its dark header for contrast.
+    if (widgetTheme !== "dark") {
+      root.style.setProperty("--oceanrag-header-bg", accentColor);
+      root.style.setProperty("--oceanrag-header-text", contrast);
+    }
+  }
 
   // Keep a stable visitor identity across visits, scoped to this widget.
   function getConversationIdentity() {
@@ -202,6 +236,8 @@
 
         <div id="oceanrag-messages" class="oceanrag-messages" aria-live="polite" aria-relevant="additions"></div>
 
+        <div id="oceanrag-starters" class="oceanrag-starters" role="group" aria-label="Suggested questions"></div>
+
         <form id="oceanrag-input-form" class="oceanrag-input-form">
           <input type="text" id="oceanrag-text-input" placeholder="Type your message..." required aria-label="Type your message" autocomplete="off" data-testid="widget-chat-input" />
           <button type="submit" id="oceanrag-send-btn" class="oceanrag-send-btn" aria-label="Send message" data-testid="widget-chat-submit">
@@ -219,6 +255,7 @@
     messagesBox = document.getElementById("oceanrag-messages");
     titleEl = document.getElementById("oceanrag-title");
     unreadBadge = document.getElementById("oceanrag-unread-badge");
+    starterPromptsBox = document.getElementById("oceanrag-starters");
 
     // Launcher toggles the panel; the icon morphs between chat and close.
     launcher.addEventListener("click", () => {
@@ -243,6 +280,43 @@
     });
 
     form.addEventListener("submit", handleQuerySubmit);
+
+    // Render the admin-configured starter prompt chips (if any).
+    renderStarterPrompts();
+  }
+
+  // Render the admin-configured starter prompt chips. Clicking a chip fills
+  // the input and immediately submits the question.
+  function renderStarterPrompts() {
+    if (!starterPromptsBox) return;
+    starterPromptsBox.innerHTML = "";
+    const prompts = Array.isArray(starterPrompts)
+      ? starterPrompts.filter((p) => typeof p === "string" && p.trim())
+      : [];
+    if (!prompts.length) {
+      // Hide the whole container (display:none) so an empty wrapper does not
+      // leave a stray padding gap above the input on the host page.
+      starterPromptsBox.style.display = "none";
+      return;
+    }
+    starterPromptsBox.style.display = "";
+    prompts.forEach((prompt) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "oceanrag-starter-chip";
+      chip.textContent = prompt;
+      chip.setAttribute("data-testid", "widget-starter-chip");
+      chip.addEventListener("click", () => {
+        if (!textInput || textInput.disabled) return;
+        textInput.value = prompt;
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        } else {
+          handleQuerySubmit(new Event("submit", { cancelable: true }));
+        }
+      });
+      starterPromptsBox.appendChild(chip);
+    });
   }
 
   // Handle queries
@@ -340,6 +414,8 @@
         placeholderText = data.placeholder_text || placeholderText;
         // Launcher label wins; fall back to the application display name.
         headerTitle = data.launcher_label || data.display_name || headerTitle;
+        accentColor = data.accent_color || null;
+        starterPrompts = Array.isArray(data.starter_prompts) ? data.starter_prompts : [];
       } else {
         console.warn("OceanRAG Widget: Failed to load configuration");
       }
@@ -348,6 +424,7 @@
     }
 
     renderWidget();
+    applyAccentColor();
 
     titleEl.textContent = headerTitle;
     textInput.placeholder = placeholderText;

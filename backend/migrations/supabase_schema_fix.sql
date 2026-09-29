@@ -516,6 +516,11 @@ BEFORE UPDATE ON public.widgets
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+-- Widget appearance extras: custom accent colour + starter prompt chips.
+ALTER TABLE public.widgets
+    ADD COLUMN IF NOT EXISTS accent_color varchar(20),
+    ADD COLUMN IF NOT EXISTS starter_prompts text[] NULL;
+
 -- Vector store table used by the ingestion pipeline.
 -- NOTE: the embedding dimension must match VECTOR_STORE_DIMENSION in the
 -- backend .env (1024 for qwen3-embedding-8b, 768 for nomic-embed-text).

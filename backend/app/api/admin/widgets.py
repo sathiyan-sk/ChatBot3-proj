@@ -58,6 +58,8 @@ def create_widget(
             launcher_label=request_payload.launcher_label,
             welcome_message=request_payload.welcome_message,
             placeholder_text=request_payload.placeholder_text,
+            accent_color=request_payload.accent_color,
+            starter_prompts=request_payload.starter_prompts,
             is_enabled=request_payload.is_enabled,
         )
     )
@@ -129,6 +131,8 @@ def update_widget(
             launcher_label=request_payload.launcher_label,
             welcome_message=request_payload.welcome_message,
             placeholder_text=request_payload.placeholder_text,
+            accent_color=request_payload.accent_color,
+            starter_prompts=request_payload.starter_prompts,
             is_enabled=request_payload.is_enabled,
         )
     )

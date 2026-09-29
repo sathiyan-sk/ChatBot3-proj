@@ -22,4 +22,17 @@ class VectorIndexer:
             )
             indexed_chunk_ids.append(chunk.chunk_id)
 
+        if embedded_chunks:
+            document_id = embedded_chunks[0].metadata.get("document_id")
+            prune_stale = getattr(
+                self.vector_store_contract,
+                "delete_stale_document_chunks",
+                None,
+            )
+            if document_id and callable(prune_stale):
+                prune_stale(
+                    document_id=document_id,
+                    keep_chunk_ids=indexed_chunk_ids,
+                )
+
         return indexed_chunk_ids

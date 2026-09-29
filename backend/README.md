@@ -31,6 +31,7 @@ Set these environment variables on the **backend Render service**:
 FRONTEND_URL=https://chatbot3-proj-1.onrender.com
 ALLOWED_ORIGINS=https://chatbot3-proj-1.onrender.com
 CORS_ALLOW_LOCAL_ORIGINS=false
+INGESTION_STALE_AFTER_MINUTES=120
 ```
 
 `FRONTEND_URL` is automatically merged into the backend global CORS allow-list,
@@ -43,6 +44,11 @@ Each application's `retention_days` setting overrides that default. Expired
 conversations and their messages are removed at startup and hourly; a visitor's
 history is also cleaned against its application's exact retention cutoff when
 the widget session is opened.
+
+An ingestion left in `processing` can be requeued after
+`INGESTION_STALE_AFTER_MINUTES` (default `120`). Fresh processing jobs are
+rejected as duplicates; the Rebuild Vector Space action reports skipped or
+failed documents instead of silently counting them as queued.
 
 Embedded customer sites are configured separately in the application's
 `allowed_origins` field in the admin UI. Add the complete origin, for example

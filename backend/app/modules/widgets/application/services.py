@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
 from uuid import UUID
-import secrets
 
 from app.core.exceptions import ApplicationError
 from app.modules.widgets.application.commands import (
@@ -14,6 +14,12 @@ from app.modules.widgets.domain.entities import Widget
 from app.modules.widgets.domain.repository_interfaces import (
     WidgetRepositoryInterface,
 )
+
+DEFAULT_STARTER_PROMPTS = [
+    "How do I upgrade my plan?",
+    "Reset my API key",
+    "What is your refund policy?",
+]
 
 
 @dataclass(slots=True)
@@ -57,6 +63,12 @@ class WidgetApplicationService:
             placeholder_text=self._clean_optional(
                 command.placeholder_text,
             ),
+            accent_color=self._clean_optional(
+                command.accent_color,
+            ),
+            starter_prompts=self._clean_prompts(
+                command.starter_prompts,
+            ),
             is_enabled=command.is_enabled,
         )
 
@@ -94,6 +106,12 @@ class WidgetApplicationService:
             "launcher_label": widget.launcher_label,
             "welcome_message": widget.welcome_message,
             "placeholder_text": widget.placeholder_text,
+            "accent_color": widget.accent_color,
+            "starter_prompts": (
+                DEFAULT_STARTER_PROMPTS.copy()
+                if widget.starter_prompts is None
+                else widget.starter_prompts
+            ),
             "is_enabled": widget.is_enabled,
         }
 
@@ -163,6 +181,12 @@ class WidgetApplicationService:
             placeholder_text=self._clean_optional(
                 command.placeholder_text,
             ),
+            accent_color=self._clean_optional(
+                command.accent_color,
+            ),
+            starter_prompts=self._clean_prompts(
+                command.starter_prompts,
+            ),
             is_enabled=command.is_enabled,
         )
 
@@ -197,6 +221,21 @@ class WidgetApplicationService:
         return normalized or None
 
     @staticmethod
+    def _clean_prompts(
+        values: list[str] | None,
+    ) -> list[str] | None:
+        if values is None:
+            return None
+
+        cleaned = [
+            str(item).strip()
+            for item in values
+            if item is not None and str(item).strip()
+        ]
+
+        return cleaned
+
+    @staticmethod
     def _to_dto(
         widget: Widget,
     ) -> WidgetDto:
@@ -209,6 +248,8 @@ class WidgetApplicationService:
             launcher_label=widget.launcher_label,
             welcome_message=widget.welcome_message,
             placeholder_text=widget.placeholder_text,
+            accent_color=widget.accent_color,
+            starter_prompts=widget.starter_prompts,
             is_enabled=widget.is_enabled,
             created_at=widget.created_at,
             updated_at=widget.updated_at,

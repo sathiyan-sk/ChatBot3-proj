@@ -64,8 +64,8 @@ class SettingsApplicationService:
 
     def _to_dto(self, settings: PlatformSettings) -> SettingsDto:
         return SettingsDto(
-            id=settings.id,
-            application_id=settings.application_id,
+            id=str(settings.id),
+            application_id=str(settings.application_id),
             llm_temperature=settings.llm_temperature,
             max_context_messages=settings.max_context_messages,
             inactivity_timeout_minutes=settings.inactivity_timeout_minutes,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -104,6 +106,7 @@ class SqlAlchemyDocumentRepository(DocumentRepositoryInterface):
         model.description = description
         model.status = status
         model.failure_reason = failure_reason
+        model.updated_at = datetime.now(timezone.utc)
         self._session.flush()
         self._session.refresh(model)
         return map_document_model_to_entity(model)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
@@ -195,6 +195,30 @@ class PgVectorProvider(VectorStoreContract):
             },
         )
         # rowcount lives on CursorResult; getattr keeps type checkers happy.
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def delete_stale_document_chunks(
+        self,
+        *,
+        document_id: str,
+        keep_chunk_ids: list[str],
+    ) -> int:
+        """Remove obsolete chunks after replacement chunks are indexed."""
+        table_name = self.settings.vector_store_table_name
+        statement = text(
+            f"""
+            delete from {table_name}
+            where document_id = cast(:document_id as text)
+              and chunk_id not in :keep_chunk_ids
+            """
+        ).bindparams(bindparam("keep_chunk_ids", expanding=True))
+        result = self.session.execute(
+            statement,
+            {
+                "document_id": str(document_id),
+                "keep_chunk_ids": keep_chunk_ids,
+            },
+        )
         return int(getattr(result, "rowcount", 0) or 0)
 
     def _map_row_to_retrieved_chunk(

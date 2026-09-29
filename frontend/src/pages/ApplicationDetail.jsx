@@ -16,6 +16,16 @@ import { EmptyState } from "@/components/ui/Stats";
 import { Modal, ConfirmDialog } from "@/components/ui/Overlays";
 import { Tabs } from "@/components/ui/Tabs";
 import { Field, Input, Textarea, Select, CheckboxRow, InsetWell } from "@/components/ui/Form";
+import { ColorPicker } from "@/components/ui/ColorPicker";
+import { StarterPrompts } from "@/components/ui/StarterPrompts";
+import { DEFAULT_WIDGET_ACCENT, readableTextOn } from "@/components/ui/colorUtils";
+
+// Default starter prompts shown in the widget until the admin customises them.
+const DEFAULT_STARTER_PROMPTS = [
+  "How do I upgrade my plan?",
+  "Reset my API key",
+  "What is your refund policy?",
+];
 
 /* ============================================================
    APPLICATION DETAIL
@@ -110,6 +120,12 @@ export default function ApplicationDetail() {
   const [placeholderText, setPlaceholderText] = useState("Type your message...");
   const [isWidgetEnabled, setIsWidgetEnabled] = useState(true);
 
+  // Accent colour is loaded from and saved to the widgets API.
+  const [widgetAccent, setWidgetAccent] = useState(DEFAULT_WIDGET_ACCENT);
+
+  // Starter prompt chips. Persisted via the widgets API (starter_prompts).
+  const [starterPrompts, setStarterPrompts] = useState(DEFAULT_STARTER_PROMPTS);
+
   // Ingestion upload states
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -170,6 +186,11 @@ export default function ApplicationDetail() {
           setLauncherLabel(widgetRes.data.launcher_label || "Chat with us");
           setPlaceholderText(widgetRes.data.placeholder_text || "Type your message...");
           setIsWidgetEnabled(widgetRes.data.is_enabled);
+          setWidgetAccent(widgetRes.data.accent_color || DEFAULT_WIDGET_ACCENT);
+          // Backend-persisted starter prompt chips.
+          if (Array.isArray(widgetRes.data.starter_prompts)) {
+            setStarterPrompts(widgetRes.data.starter_prompts);
+          }
         } catch (error) {
           if (error.response?.status !== 404) {
             console.warn("Failed to load widget configuration for this application", error);
@@ -278,6 +299,8 @@ export default function ApplicationDetail() {
           launcher_label: launcherLabel,
           welcome_message: greetingMsg,
           placeholder_text: placeholderText,
+          accent_color: widgetAccent,
+          starter_prompts: starterPrompts,
           is_enabled: isWidgetEnabled,
         });
       } else {
@@ -290,6 +313,8 @@ export default function ApplicationDetail() {
             launcher_label: launcherLabel,
             welcome_message: greetingMsg,
             placeholder_text: placeholderText,
+            accent_color: widgetAccent,
+            starter_prompts: starterPrompts,
             is_enabled: isWidgetEnabled,
           });
         } catch (error) {
@@ -301,6 +326,8 @@ export default function ApplicationDetail() {
               launcher_label: launcherLabel,
               welcome_message: greetingMsg,
               placeholder_text: placeholderText,
+              accent_color: widgetAccent,
+              starter_prompts: starterPrompts,
               is_enabled: isWidgetEnabled,
             });
           } else {
@@ -420,6 +447,8 @@ export default function ApplicationDetail() {
       // only re-ingested documents[0], which silently skipped the rest).
       const targets = documents.filter((d) => d.status !== "archived");
       let queued = 0;
+      let alreadyProcessing = 0;
+      let failed = 0;
       for (const doc of targets) {
         try {
           await apiClient.post("/admin/ingestion/start", {
@@ -427,11 +456,29 @@ export default function ApplicationDetail() {
           });
           queued += 1;
         } catch (docErr) {
+          if (docErr.response?.status === 409) {
+            alreadyProcessing += 1;
+          } else {
+            failed += 1;
+          }
           console.error(`Reindex failed for document ${doc.id}`, docErr);
         }
       }
       if (queued > 0) {
-        toast.success(`Vector rebuild queued for ${queued} document(s)!`);
+        const details = [
+          alreadyProcessing ? `${alreadyProcessing} already processing` : null,
+          failed ? `${failed} could not be queued` : null,
+        ].filter(Boolean).join("; ");
+        toast.success(`Vector rebuild queued for ${queued} document(s)!`, {
+          description: details || undefined,
+        });
+      } else if (alreadyProcessing > 0 || failed > 0) {
+        toast.error("No documents were queued for rebuild.", {
+          description: [
+            alreadyProcessing ? `${alreadyProcessing} already processing` : null,
+            failed ? `${failed} failed to queue` : null,
+          ].filter(Boolean).join("; "),
+        });
       } else {
         toast.error("No documents could be queued for reindexing.");
       }
@@ -483,6 +530,11 @@ export default function ApplicationDetail() {
       console.error(e);
       toast.error(`Failed to ${action} document.`);
     }
+  };
+
+  // Accent changes preview immediately and are persisted when the form is saved.
+  const handleAccentChange = (hex) => {
+    setWidgetAccent(hex);
   };
 
   // Open the edit modal pre-filled from the loaded application
@@ -600,8 +652,13 @@ export default function ApplicationDetail() {
   // Resolve the full preview palette from the selected theme so the
   // Live Preview visibly switches between light and dark.
   const pv = PREVIEW_THEMES[widgetTheme === "dark" ? "dark" : "light"];
-  const previewColor = pv.headerBg;
-  const previewHeaderTextColor = pv.headerText;
+
+  // The accent colour drives the launcher + send button in BOTH themes, and
+  // the header background in light theme (matching the real widget.css).
+  const accentColor = widgetAccent || pv.accent;
+  const accentContrast = readableTextOn(accentColor);
+  const previewColor = widgetTheme === "dark" ? pv.headerBg : accentColor;
+  const previewHeaderTextColor = widgetTheme === "dark" ? pv.headerText : accentContrast;
 
   const embedSnippetHtml = widgetCfg
     ? `<!-- OceanRAG Embeddable Widget Snippet -->
@@ -614,7 +671,7 @@ export default function ApplicationDetail() {
     backendUrl: "${BACKEND_URL}"
   };
 </script>
-<script src="${FRONTEND_URL}/widget/widget.js?v=3" async></script>`
+<script src="${FRONTEND_URL}/widget/widget.js?v=4" async></script>`
     : "";
 
   const copyToClipboard = (text, type) => {
@@ -1128,6 +1185,46 @@ export default function ApplicationDetail() {
                     </Field>
                   </div>
 
+                  {/* Accent colour - presets + custom picker */}
+                  <div className="pt-4 border-t border-white/[0.06]">
+                    <div className="flex items-center justify-between gap-3 mb-2.5">
+                      <span className="text-meta text-slate-300">Accent Colour</span>
+                      <span className="text-[10px] text-slate-500 font-mono uppercase">
+                        {accentColor}
+                      </span>
+                    </div>
+                    <ColorPicker
+                      value={widgetAccent}
+                      onChange={handleAccentChange}
+                      defaultValue={DEFAULT_WIDGET_ACCENT}
+                    />
+                    <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                      Applied to the launcher and send button (and the header in light theme).
+                      Choose a preset or pick a custom colour.
+                    </p>
+                  </div>
+
+                  {/* Starter prompts & FAQs */}
+                  <div className="pt-4 border-t border-white/[0.06]">
+                    <div className="flex items-center gap-2 mb-1">
+                      <MessageSquare className="h-3.5 w-3.5 text-[#00D4FF]" aria-hidden="true" />
+                      <span className="text-card-title text-white text-[14px]">
+                        Starter prompts & FAQs
+                      </span>
+                    </div>
+                    <span className="block text-eyebrow text-slate-500 mb-3">
+                      Starter prompt chips
+                    </span>
+                    <StarterPrompts
+                      value={starterPrompts}
+                      onChange={setStarterPrompts}
+                    />
+                    <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                      Drag to reorder. These chips are shown above the input to help users start a
+                      conversation.
+                    </p>
+                  </div>
+
                   <CheckboxRow
                     id="widget-enabled"
                     checked={isWidgetEnabled}
@@ -1242,6 +1339,25 @@ export default function ApplicationDetail() {
                       {greetingMsg || "Hello! Ask me anything."}
                     </div>
                   </div>
+
+                  {/* Starter prompt chips (shown to help users begin) */}
+                  {starterPrompts.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pl-8">
+                      {starterPrompts.slice(0, 4).map((prompt, i) => (
+                        <span
+                          key={i}
+                          className="rounded-full px-2.5 py-1 text-[9px] border truncate max-w-[160px]"
+                          style={{
+                            backgroundColor: pv.botBubbleBg,
+                            borderColor: accentColor,
+                            color: pv.bodyText,
+                          }}
+                        >
+                          {prompt}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div
@@ -1260,7 +1376,7 @@ export default function ApplicationDetail() {
                   </div>
                   <div
                     className="h-6 w-12 rounded-[8px] flex items-center justify-center text-[9px] font-bold flex-shrink-0"
-                    style={{ backgroundColor: pv.accent, color: pv.accentContrast }}
+                    style={{ backgroundColor: accentColor, color: accentContrast }}
                   >
                     SEND
                   </div>
@@ -1273,7 +1389,7 @@ export default function ApplicationDetail() {
                 <span className="text-[10px] text-slate-500">Launcher preview</span>
                 <div
                   className="h-11 w-11 rounded-full flex items-center justify-center text-lg shadow-xl border border-white/[0.10] flex-shrink-0"
-                  style={{ backgroundColor: pv.accent, color: pv.accentContrast }}
+                  style={{ backgroundColor: accentColor, color: accentContrast }}
                   title={launcherLabel}
                 >
                   💬
