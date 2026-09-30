@@ -155,11 +155,13 @@ def update_widget(
 )
 def delete_widget(
     widget_id: UUID,
+    request: Request,
     service: WidgetApplicationService = Depends(
         get_widget_application_service,
     ),
 ) -> Response:
     service.delete(widget_id)
+    clear_cors_cache(request)
 
     return Response(
         status_code=status.HTTP_204_NO_CONTENT,

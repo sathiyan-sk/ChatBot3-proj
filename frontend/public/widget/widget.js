@@ -448,9 +448,11 @@
         starterPrompts = Array.isArray(data.starter_prompts) ? data.starter_prompts : [];
       } else {
         console.warn("OceanRAG Widget: Failed to load configuration");
+        return;
       }
     } catch (e) {
       console.warn("OceanRAG Widget: Could not sync widget settings.", e);
+      return;
     }
 
     renderWidget();

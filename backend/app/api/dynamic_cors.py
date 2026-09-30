@@ -64,9 +64,11 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._settings = settings
         self._session_factory = session_factory
-        # Short-lived cache: widget_key -> (frozenset[origins], expiry)
+        # Origin allow-lists are mutable through the admin UI and should not be
+        # cached across requests: a stale cached allow-list can continue denying
+        # a valid production origin even after the application config was updated.
         self._cache: dict[str, tuple[frozenset[str], float]] = {}
-        self._cache_ttl_seconds = 60.0
+        self._cache_ttl_seconds = 0.0
 
     def clear_cache(self, widget_key: str | None = None) -> None:
         """Clear cache for a specific widget key or all cache if widget_key is None."""
