@@ -133,6 +133,6 @@ def start_widget_session(
         )
 
     return WidgetSessionResponse(
-        conversation_id=active_conversation.id,
+        conversation_id=str(active_conversation.id),
         messages=history,
     )

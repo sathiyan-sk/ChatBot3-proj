@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 
 class OriginValidator:
     """Validates widget request origins against an application's allow-list.
@@ -11,12 +13,7 @@ class OriginValidator:
     Remote origins must appear in the application's allowed_origins list.
     """
 
-    _ALWAYS_ALLOWED_PREFIXES = (
-        "http://localhost",
-        "https://localhost",
-        "http://127.0.0.1",
-        "https://127.0.0.1",
-    )
+    _LOCAL_HOSTS = {"localhost", "127.0.0.1"}
     _NULL_ORIGIN = "null"
 
     def is_allowed(
@@ -35,10 +32,10 @@ class OriginValidator:
         if normalized_origin == self._NULL_ORIGIN:
             return True
 
-        # Local development servers are always trusted.
-        for prefix in self._ALWAYS_ALLOWED_PREFIXES:
-            if normalized_origin.startswith(prefix):
-                return True
+        # Local development servers are always trusted, but only for exact
+        # loopback hosts (not lookalike domains such as localhost.example).
+        if self._is_local_origin(normalized_origin):
+            return True
 
         allowed = [
             self._normalize(item)
@@ -54,3 +51,22 @@ class OriginValidator:
     @staticmethod
     def _normalize(value: str) -> str:
         return value.strip().rstrip("/").lower()
+
+    @classmethod
+    def _is_local_origin(cls, origin: str) -> bool:
+        try:
+            parsed = urlsplit(origin)
+            port = parsed.port
+        except ValueError:
+            return False
+
+        return (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname in cls._LOCAL_HOSTS
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and (port is None or 0 < port <= 65535)
+        )

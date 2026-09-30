@@ -133,7 +133,11 @@ def create_widget_chat_message(
     ]
 
     return ChatMessageResponse(
-        conversation_id=result.conversation_id,
+        conversation_id=(
+            str(result.conversation_id)
+            if result.conversation_id is not None
+            else ""
+        ),
         answer=result.answer_text,
         citations=citations,
         created_at=datetime.now(timezone.utc),

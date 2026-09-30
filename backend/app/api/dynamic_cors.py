@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from urllib.parse import urlsplit
 
 from fastapi import Request
 from sqlalchemy import text
@@ -20,12 +21,6 @@ _WIDGET_API_PREFIXES = (
     "/api/client/chat",
 )
 
-_LOCAL_ORIGIN_PREFIXES = (
-    "http://localhost",
-    "https://localhost",
-    "http://127.0.0.1",
-    "https://127.0.0.1",
-)
 _NULL_ORIGIN = "null"
 
 _ALLOWED_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
@@ -140,7 +135,21 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         normalized = _normalize_origin(origin)
         if normalized == _NULL_ORIGIN:
             return True
-        return any(normalized.startswith(prefix) for prefix in _LOCAL_ORIGIN_PREFIXES)
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError:
+            return False
+        return (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname in {"localhost", "127.0.0.1"}
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and (port is None or 0 < port <= 65535)
+        )
 
     def _is_origin_allowed(self, request: Request, origin: str) -> bool:
         normalized = _normalize_origin(origin)
@@ -166,6 +175,11 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
             return False
 
         allowed_origins = self._allowed_origins_for_key(widget_key=widget_key)
+
+        # A failed database lookup is different from an intentionally empty
+        # allow-list. Fail closed when the configured policy cannot be read.
+        if allowed_origins is None:
+            return False
         
         # If allowed_origins is empty, allow all origins (permissive mode)
         if not allowed_origins:
@@ -176,7 +190,7 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         logger.debug(f"Widget key {widget_key}: allowed_origins={allowed_origins}, is_allowed={is_allowed}")
         return is_allowed
 
-    def _allowed_origins_for_key(self, widget_key: str) -> frozenset[str]:
+    def _allowed_origins_for_key(self, widget_key: str) -> frozenset[str] | None:
         now = time.monotonic()
 
         cached = self._cache.get(widget_key)
@@ -192,8 +206,9 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         for key in expired:
             self._cache.pop(key, None)
 
-        session = self._session_factory()
+        session = None
         try:
+            session = self._session_factory()
             rows = session.execute(
                 text(
                     """
@@ -239,9 +254,10 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         except Exception:
             # Fail closed: if the DB is unreachable, do not open CORS.
             logger.exception(f"Dynamic CORS origin lookup failed for widget_key={widget_key}")
-            return frozenset()
+            return None
         finally:
-            session.close()
+            if session is not None:
+                session.close()
 
     @staticmethod
     def _is_widget_api_path(path: str) -> bool:
