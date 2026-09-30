@@ -47,7 +47,7 @@ class OriginValidator:
         ]
 
         if not allowed:
-            return False
+            return True
 
         return normalized_origin in allowed
 

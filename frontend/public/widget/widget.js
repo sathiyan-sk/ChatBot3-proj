@@ -280,25 +280,26 @@
     });
 
     form.addEventListener("submit", handleQuerySubmit);
-
-    // Render the admin-configured starter prompt chips (if any).
-    renderStarterPrompts();
   }
 
   // Render the admin-configured starter prompt chips. Clicking a chip fills
   // the input and immediately submits the question.
-  function renderStarterPrompts() {
+  function hideStarterPrompts() {
     if (!starterPromptsBox) return;
     starterPromptsBox.innerHTML = "";
+    starterPromptsBox.style.display = "none";
+  }
+
+  function renderStarterPrompts() {
+    if (!starterPromptsBox) return;
     const prompts = Array.isArray(starterPrompts)
       ? starterPrompts.filter((p) => typeof p === "string" && p.trim())
       : [];
     if (!prompts.length) {
-      // Hide the whole container (display:none) so an empty wrapper does not
-      // leave a stray padding gap above the input on the host page.
-      starterPromptsBox.style.display = "none";
+      hideStarterPrompts();
       return;
     }
+    starterPromptsBox.innerHTML = "";
     starterPromptsBox.style.display = "";
     prompts.forEach((prompt) => {
       const chip = document.createElement("button");
@@ -308,6 +309,7 @@
       chip.setAttribute("data-testid", "widget-starter-chip");
       chip.addEventListener("click", () => {
         if (!textInput || textInput.disabled) return;
+        hideStarterPrompts();
         textInput.value = prompt;
         if (typeof form.requestSubmit === "function") {
           form.requestSubmit();
@@ -319,12 +321,29 @@
     });
   }
 
+  function showBackendError(response, fallback) {
+    let message = fallback;
+    try {
+      return response.clone().json().then((data) => {
+        const detail = data?.error?.message || data?.detail?.message || data?.detail || fallback;
+        const messageText = typeof detail === "string" ? detail : fallback;
+        addMessage(messageText, "bot");
+      }, () => {
+        addMessage(fallback, "bot");
+      });
+    } catch {
+      addMessage(fallback, "bot");
+    }
+    return null;
+  }
+
   // Handle queries
   async function handleQuerySubmit(e) {
     e.preventDefault();
     const query = textInput.value.trim();
     if (!query) return;
 
+    hideStarterPrompts();
     addMessage(query, "user");
     textInput.value = "";
 
@@ -374,12 +393,23 @@
 
         // Citations are intentionally NOT shown to end users.
         addMessage(data.answer, "bot");
-      } else if (response.status === 403) {
-        addMessage("⚠️ Access denied. This widget is not authorized for this domain.", "bot");
-      } else if (response.status === 404) {
-        addMessage("⚠️ Widget configuration not found. Please contact support.", "bot");
       } else {
-        addMessage("⚠️ Failed to process your request. Please try again later.", "bot");
+        let fallback = "⚠️ Failed to process your request. Please try again later.";
+        if (response.status === 403) {
+          fallback = "⚠️ Access denied. This widget is not authorized for this domain.";
+        } else if (response.status === 404) {
+          fallback = "⚠️ Widget configuration not found. Please contact support.";
+        } else if (response.status === 409) {
+          fallback = "⚠️ No ready knowledge is available yet. Please try again later.";
+        }
+
+        try {
+          const data = await response.json();
+          const detail = data?.error?.message || data?.detail?.message || data?.detail || fallback;
+          addMessage(typeof detail === "string" ? detail : fallback, "bot");
+        } catch {
+          addMessage(fallback, "bot");
+        }
       }
     } catch {
       thinkingRow.remove();
@@ -449,18 +479,23 @@
       if (sessionResponse.ok) {
         const session = await sessionResponse.json();
         conversationId = session.conversation_id || null;
-        if (session.messages?.length) {
+        if (Array.isArray(session.messages) && session.messages.length > 0) {
+          hideStarterPrompts();
           for (const message of session.messages) {
             addMessage(message.content, message.role === "user" ? "user" : "bot", {
               createdAt: message.created_at,
               silent: true,
             });
           }
+        } else {
+          renderStarterPrompts();
         }
       } else {
+        hideStarterPrompts();
         console.warn("OceanRAG Widget: Could not restore conversation history.");
       }
     } catch (error) {
+      hideStarterPrompts();
       console.warn("OceanRAG Widget: Could not restore conversation history.", error);
     }
 
