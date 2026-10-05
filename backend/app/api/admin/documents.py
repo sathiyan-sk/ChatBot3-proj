@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import (
@@ -56,6 +57,22 @@ router = APIRouter(
         Depends(require_admin),
     ],
 )
+
+
+def _is_ingestion_stale(
+    updated_at: datetime,
+    *,
+    now: datetime,
+    stale_after_minutes: int,
+) -> bool:
+    normalized_updated_at = updated_at
+    if normalized_updated_at.tzinfo is None:
+        normalized_updated_at = normalized_updated_at.replace(
+            tzinfo=timezone.utc,
+        )
+    return now - normalized_updated_at >= timedelta(
+        minutes=stale_after_minutes,
+    )
 
 
 @router.post(
@@ -155,6 +172,7 @@ def get_document_by_id(
     response_model=list[DocumentResponse],
 )
 def list_documents(
+    request: Request,
     knowledge_base_id: UUID | None = Query(None),
     status_value: str | None = Query(None, alias="status"),
     service: DocumentApplicationService = Depends(
@@ -178,6 +196,27 @@ def list_documents(
 
     else:
         results = service.list_all()
+
+    stale_after_minutes = request.app.state.settings.ingestion_stale_after_minutes
+    now = datetime.now(timezone.utc)
+    for index, document in enumerate(results):
+        if (
+            document.status == "processing"
+            and _is_ingestion_stale(
+                document.updated_at,
+                now=now,
+                stale_after_minutes=stale_after_minutes,
+            )
+        ):
+            results[index] = service.mark_failed(
+                MarkDocumentFailedCommand(
+                    document_id=str(document.id),
+                    failure_reason=(
+                        "Ingestion did not finish within "
+                        f"{stale_after_minutes} minutes. Retry this document."
+                    ),
+                )
+            )
 
     return [
         DocumentResponse.model_validate(

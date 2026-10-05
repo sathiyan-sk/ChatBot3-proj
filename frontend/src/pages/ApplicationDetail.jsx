@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import {
@@ -130,6 +130,7 @@ export default function ApplicationDetail() {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isRebuilding, setIsRebuilding] = useState(false);
+  const documentPollDelayRef = useRef(3000);
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [websiteTitle, setWebsiteTitle] = useState("");
 
@@ -234,28 +235,58 @@ export default function ApplicationDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Document Auto polling for pending/processing states
-  // (backend statuses: pending | processing | ready | failed | archived)
+  // Poll sequentially with backoff while document ingestion is unfinished.
   useEffect(() => {
     if (!knowledgeBase?.id) return;
 
     const unfinished = documents.some(
       (d) => d.status === "pending" || d.status === "processing"
     );
-    if (unfinished) {
-      const interval = setInterval(async () => {
-        try {
-          const docsRes = await apiClient.get(
-            `/admin/documents?knowledge_base_id=${knowledgeBase.id}`
-          );
-          setDocuments(docsRes.data);
-        } catch (e) {
-          console.warn("Polling documents failed", e);
-        }
-      }, 3000);
-      return () => clearInterval(interval);
+    if (!unfinished) {
+      documentPollDelayRef.current = 3000;
+      return;
     }
-  }, [documents, knowledgeBase]);
+
+    let timeoutId;
+    let cancelled = false;
+    const pollDocuments = async () => {
+      try {
+        const docsRes = await apiClient.get(
+          `/admin/documents?knowledge_base_id=${knowledgeBase.id}`
+        );
+        if (cancelled) return;
+
+        setDocuments(docsRes.data);
+        const stillUnfinished = docsRes.data.some(
+          (doc) => doc.status === "pending" || doc.status === "processing"
+        );
+        if (!stillUnfinished) {
+          documentPollDelayRef.current = 3000;
+          return;
+        }
+        documentPollDelayRef.current = Math.min(
+          Math.round(documentPollDelayRef.current * 1.5),
+          15000
+        );
+      } catch (e) {
+        console.warn("Polling documents failed", e);
+        documentPollDelayRef.current = Math.min(
+          documentPollDelayRef.current * 2,
+          30000
+        );
+      }
+
+      if (!cancelled) {
+        timeoutId = setTimeout(pollDocuments, documentPollDelayRef.current);
+      }
+    };
+
+    timeoutId = setTimeout(pollDocuments, documentPollDelayRef.current);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [documents, knowledgeBase?.id]);
 
   const handleUpdateSettings = async (e) => {
     e.preventDefault();

@@ -251,6 +251,10 @@ def run_document_ingestion_task(
     request_context = SimpleNamespace(app=app)
     session_factory = _get_app_session_factory(app)
     session: Session = session_factory()
+    logger.info(
+        "Document ingestion task started",
+        extra={"document_id": document_id},
+    )
 
     try:
         document_service = get_document_application_service(
@@ -325,11 +329,13 @@ def run_document_ingestion_task(
             },
         )
 
+        failure_session: Session | None = None
         try:
             _safe_rollback(session)
+            failure_session = session_factory()
             failed_document_service = get_document_application_service(
                 request=request_context,
-                session=session,
+                session=failure_session,
             )
             failed_document_service.mark_failed(
                 MarkDocumentFailedCommand(
@@ -337,15 +343,25 @@ def run_document_ingestion_task(
                     failure_reason=str(exc),
                 )
             )
-            session.commit()
+            failure_session.commit()
         except Exception:
-            _safe_rollback(session)
+            if failure_session is not None:
+                _safe_rollback(failure_session)
             logger.exception(
                 "Could not mark document as failed",
                 extra={
                     "document_id": document_id,
                 },
             )
+        finally:
+            if failure_session is not None:
+                try:
+                    failure_session.close()
+                except Exception:
+                    logger.exception(
+                        "Could not close failure-status database session.",
+                        extra={"document_id": document_id},
+                    )
 
         return
 
