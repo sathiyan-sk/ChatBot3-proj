@@ -344,6 +344,14 @@ export default function ApplicationDetail() {
   };
 
   // Upload Actions
+  const getDocumentActionError = (error, fallback) => {
+    const detail =
+      error.response?.data?.error?.message ||
+      error.response?.data?.detail?.message ||
+      error.response?.data?.detail;
+    return typeof detail === "string" ? detail : fallback;
+  };
+
   const handleUpload = async (file) => {
     if (!knowledgeBase?.id) {
       toast.error("No knowledge base found. Please create one first.");
@@ -364,17 +372,14 @@ export default function ApplicationDetail() {
     form.append("title", file.name);
 
     try {
-      await apiClient.post("/admin/documents/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      toast.success(`"${file.name}" uploaded successfully! Real-time ingestion triggered.`);
+      await apiClient.post("/admin/documents/upload", form);
+      toast.success(`"${file.name}" uploaded; ingestion has been queued.`);
       // Refresh documents
       const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
       setDocuments(docsRes.data);
     } catch (e) {
       console.error(e);
-      const msg = e.response?.data?.detail || "Ingestion failed.";
-      toast.error(msg);
+      toast.error(getDocumentActionError(e, "File upload or ingestion scheduling failed."));
     } finally {
       setIsUploading(false);
     }
@@ -528,7 +533,7 @@ export default function ApplicationDetail() {
       }
     } catch (e) {
       console.error(e);
-      toast.error(`Failed to ${action} document.`);
+      toast.error(getDocumentActionError(e, `Failed to ${action} document.`));
     }
   };
 
@@ -632,7 +637,15 @@ export default function ApplicationDetail() {
       setSandboxHistory((prev) => [...prev, botMsg]);
     } catch (e) {
       console.error(e);
-      toast.error("RAG chat connection failed.");
+      const detail =
+        e.response?.data?.error?.message ||
+        e.response?.data?.detail?.message ||
+        e.response?.data?.detail;
+      toast.error(
+        typeof detail === "string"
+          ? detail
+          : "RAG chat connection failed. Check the API key, application status, and backend logs."
+      );
     } finally {
       setIsChatLoading(false);
     }
@@ -1068,6 +1081,14 @@ export default function ApplicationDetail() {
                                       )}
                                       {meta.label}
                                     </Badge>
+                                    {doc.status === "failed" && doc.failure_reason && (
+                                      <p
+                                        className="mt-1 max-w-[220px] truncate text-[10px] text-rose-300"
+                                        title={doc.failure_reason}
+                                      >
+                                        {doc.failure_reason}
+                                      </p>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4">
                                     <div className="flex items-center justify-end gap-1.5">

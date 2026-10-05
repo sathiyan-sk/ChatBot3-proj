@@ -377,15 +377,21 @@ def get_knowledge_ingestion_pipeline(
             parsing_contract=PyMuPDFParsingProvider(),
         )
 
-    elif source_type in {"txt", "text", "md", "markdown", "json", "doc", "docx", "xls", "xlsx", "ppt", "pptx"}:
-        # Plain-text style formats (and office formats when Docling is
-        # unavailable) are decoded directly instead of being forced
-        # through the PDF-only Docling converter.
+    elif source_type in {"txt", "text", "md", "markdown", "json"}:
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
 
         parser = TextDocumentParser()
+
+    elif source_type in {"doc", "docx", "xls", "xlsx", "ppt", "pptx"}:
+        source_loader = FileSourceLoader(
+            storage_contract=storage_provider,
+        )
+
+        parser = StructuredDocumentParser(
+            parsing_contract=DoclingParsingProvider(),
+        )
 
     elif source_type == "website":
         source_loader = WebsiteSourceLoader()

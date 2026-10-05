@@ -64,6 +64,20 @@ class QuestionAnsweringPipeline:
             top_k=request.top_k,
         )
 
+        if not reranked_chunks:
+            logger.info(
+                "No relevant chunks retrieved for query '%s'; using safe fallback response.",
+                request.query_text,
+            )
+            return self.response_formatter.format(
+                answer_text=(
+                    "I can help with questions about our business, but I need a bit more detail to answer accurately. "
+                    "Please share the specific issue or question and I’ll help as best I can."
+                ),
+                citations=[],
+                retrieved_chunks=[],
+            )
+
         system_prompt = self.prompt_builder.build_system_prompt(
             request.prompt_system_template,
         )

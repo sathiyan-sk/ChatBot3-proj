@@ -76,3 +76,56 @@ def test_dynamic_cors_keeps_empty_allow_list_permissive():
     )
 
     assert middleware._is_origin_allowed(request, "https://client.example")
+
+
+def test_api_key_preflight_is_accepted_for_client_chat():
+    middleware = DynamicCorsMiddleware(
+        lambda scope, receive, send: None,
+        settings=SimpleNamespace(
+            cors_allow_local_origins=False,
+            cors_allowed_origins=(),
+        ),
+        session_factory=lambda: None,
+    )
+    request = SimpleNamespace(
+        headers={
+            "access-control-request-headers": "content-type, x-api-key",
+        },
+        method="OPTIONS",
+        url=SimpleNamespace(path="/api/client/chat/messages"),
+    )
+
+    assert middleware._is_origin_allowed(request, "https://admin.example")
+    request.url.path = "/api/client/widget/configuration"
+    assert not middleware._is_origin_allowed(request, "https://admin.example")
+
+
+def test_global_frontend_origin_can_use_client_chat_but_not_widget_routes():
+    class CustomerOriginSession:
+        def execute(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                scalars=lambda: SimpleNamespace(
+                    all=lambda: [["https://customer.example"]]
+                )
+            )
+
+        def close(self):
+            pass
+
+    middleware = DynamicCorsMiddleware(
+        lambda scope, receive, send: None,
+        settings=SimpleNamespace(
+            cors_allow_local_origins=False,
+            cors_allowed_origins=("https://admin.example/",),
+        ),
+        session_factory=CustomerOriginSession,
+    )
+    request = SimpleNamespace(
+        headers={"X-API-Key": "application-key"},
+        method="POST",
+        url=SimpleNamespace(path="/api/client/chat/messages"),
+    )
+
+    assert middleware._is_origin_allowed(request, "https://admin.example")
+    request.url.path = "/api/client/widget/configuration"
+    assert not middleware._is_origin_allowed(request, "https://admin.example")

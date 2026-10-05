@@ -168,11 +168,42 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
         if not widget_key:
             logger.debug(f"No widget key in headers for origin {origin}")
             if request.method == "OPTIONS":
-                requested_headers = (request.headers.get("access-control-request-headers") or "").lower()
-                if "x-widget-key" in requested_headers:
-                    logger.debug("Preflight includes X-Widget-Key in requested headers; allowing local-origin style request")
+                requested_headers = {
+                    header.strip().lower()
+                    for header in (
+                        request.headers.get("access-control-request-headers") or ""
+                    ).split(",")
+                }
+                path = request.url.path
+                widget_key_preflight = (
+                    "x-widget-key" in requested_headers
+                    and (
+                        path.startswith("/api/client/widget/")
+                        or path == "/api/client/chat/widget/messages"
+                    )
+                )
+                api_key_preflight = (
+                    "x-api-key" in requested_headers
+                    and path == "/api/client/chat/messages"
+                )
+                if widget_key_preflight or api_key_preflight:
+                    logger.debug("Preflight includes the expected key header for the client route")
                     return True
             return False
+
+        trusted_frontend_origins = {
+            _normalize_origin(configured_origin)
+            for configured_origin in getattr(
+                self._settings,
+                "cors_allowed_origins",
+                (),
+            )
+        }
+        if (
+            request.url.path == "/api/client/chat/messages"
+            and normalized in trusted_frontend_origins
+        ):
+            return True
 
         allowed_origins = self._allowed_origins_for_key(widget_key=widget_key)
 
