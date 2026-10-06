@@ -181,7 +181,7 @@ def load_settings() -> Settings:
             ),
             parsing=os.getenv(
                 "PARSING_PROVIDER",
-                "pymupdf",
+                "docling",
             ),
         ),
         storage=StorageSettings(

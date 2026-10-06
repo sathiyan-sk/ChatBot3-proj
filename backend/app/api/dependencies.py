@@ -22,6 +22,9 @@ from app.infrastructure.providers.llm.openrouter_provider import (
 from app.infrastructure.providers.parsing.docling_provider import (
     DoclingParsingProvider,
 )
+from app.infrastructure.providers.parsing.fallback_provider import (
+    FallbackParsingProvider,
+)
 from app.infrastructure.providers.parsing.html_parsing_provider import (
     HtmlParsingProvider,
 )
@@ -47,6 +50,7 @@ from app.knowledge_engine.ingestion.parsers.text_parser import TextDocumentParse
 from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
     StructuredDocumentParser,
 )
+from app.knowledge_engine.ingestion.parsers.csv_parser import CsvDocumentParser
 from app.knowledge_engine.ingestion.source_loaders.csv_loader import CsvSourceLoader
 from app.knowledge_engine.ingestion.source_loaders.file_loader import FileSourceLoader
 from app.knowledge_engine.ingestion.source_loaders.website_loader import (
@@ -370,11 +374,26 @@ def get_knowledge_ingestion_pipeline(
     )
 
     if source_type == "pdf":
-        source_loader=FileSourceLoader(
+        parsing_provider = settings.providers.parsing.strip().lower()
+        if parsing_provider == "docling":
+            primary_parser = DoclingParsingProvider()
+            fallback_parser = PyMuPDFParsingProvider()
+        elif parsing_provider == "pymupdf":
+            primary_parser = PyMuPDFParsingProvider()
+            fallback_parser = DoclingParsingProvider()
+        else:
+            raise ValueError(
+                "PARSING_PROVIDER must be either 'docling' or 'pymupdf'."
+            )
+
+        source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
-        parser=StructuredDocumentParser(
-            parsing_contract=PyMuPDFParsingProvider(),
+        parser = StructuredDocumentParser(
+            parsing_contract=FallbackParsingProvider(
+                primary=primary_parser,
+                fallback=fallback_parser,
+            ),
         )
 
     elif source_type in {"txt", "text", "md", "markdown", "json"}:
@@ -407,9 +426,7 @@ def get_knowledge_ingestion_pipeline(
             storage_contract=storage_provider,
         )
 
-        parser = StructuredDocumentParser(
-            parsing_contract=DoclingParsingProvider(),
-        )
+        parser = CsvDocumentParser()
 
     elif source_type == "image":
         source_loader = FileSourceLoader(

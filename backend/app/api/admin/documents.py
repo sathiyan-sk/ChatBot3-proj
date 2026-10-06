@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePath
 from uuid import UUID
 
 from fastapi import (
@@ -58,6 +59,10 @@ router = APIRouter(
     ],
 )
 
+SUPPORTED_UPLOAD_EXTENSIONS = frozenset(
+    {".pdf", ".docx", ".txt", ".csv", ".json", ".md"}
+)
+
 
 def _is_ingestion_stale(
     updated_at: datetime,
@@ -90,13 +95,36 @@ def upload_document(
         get_document_application_service,
     ),
 ) -> DocumentResponse:
+    filename = file.filename or ""
+    extension = PurePath(filename).suffix.lower()
+    if extension not in SUPPORTED_UPLOAD_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_UPLOAD_EXTENSIONS))
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "code": "unsupported_document_format",
+                "message": (
+                    f"Unsupported document format '{extension or 'unknown'}'. "
+                    f"Supported formats: {supported}."
+                ),
+            },
+        )
+
     content = file.file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "empty_document_upload",
+                "message": "The uploaded document is empty.",
+            },
+        )
 
     result = service.upload(
         knowledge_base_id=(knowledge_base_id),
         title=title,
         description=description,
-        filename=file.filename or "uploaded-file",
+        filename=filename,
         content_type=file.content_type,
         content=content,
     )

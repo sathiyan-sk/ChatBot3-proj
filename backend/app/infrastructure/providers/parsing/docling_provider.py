@@ -92,12 +92,8 @@ class DoclingParsingProvider(ParsingContract):
                 DocumentStream,
                 InputFormat,
             )
-            from docling.datamodel.pipeline_options import (
-                PdfPipelineOptions,
-            )
             from docling.document_converter import (
                 DocumentConverter,
-                PdfFormatOption,
             )
 
         except Exception as exc:
@@ -118,6 +114,21 @@ class DoclingParsingProvider(ParsingContract):
                 )[-1]
                 or "document"
             )
+            extension = source_name.rsplit(".", 1)[-1].lower()
+            input_formats = {
+                "pdf": InputFormat.PDF,
+                "docx": InputFormat.DOCX,
+            }
+            input_format = input_formats.get(extension)
+            if input_format is None:
+                raise ApplicationError(
+                    message=(
+                        f"Docling does not support the uploaded "
+                        f".{extension} format in this configuration."
+                    ),
+                    code="docling_input_format_unsupported",
+                    status_code=415,
+                )
 
             document_stream = DocumentStream(
                 name=source_name,
@@ -126,17 +137,8 @@ class DoclingParsingProvider(ParsingContract):
                 ),
             )
 
-            pdf_options = PdfPipelineOptions(
-                do_ocr=False,
-                do_table_structure=False,
-            )
-
             converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: PdfFormatOption(
-                        pipeline_options=pdf_options,
-                    ),
-                },
+                allowed_formats=[input_format],
             )
 
             conversion_result = converter.convert(

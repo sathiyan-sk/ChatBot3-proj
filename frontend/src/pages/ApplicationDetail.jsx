@@ -376,11 +376,24 @@ export default function ApplicationDetail() {
 
   // Upload Actions
   const getDocumentActionError = (error, fallback) => {
-    const detail =
-      error.response?.data?.error?.message ||
-      error.response?.data?.detail?.message ||
-      error.response?.data?.detail;
-    return typeof detail === "string" ? detail : fallback;
+    const responseData = error.response?.data;
+    const errorBody = responseData?.error;
+    const detail = errorBody?.message || responseData?.detail?.message || responseData?.detail;
+    const validationDetails = errorBody?.details || responseData?.detail?.details;
+    const formattedDetails = Array.isArray(validationDetails)
+      ? validationDetails
+          .map((item) => {
+            const field = Array.isArray(item.loc) ? item.loc.slice(1).join(".") : "";
+            return [field, item.msg].filter(Boolean).join(": ");
+          })
+          .filter(Boolean)
+          .join("; ")
+      : "";
+
+    if (typeof detail === "string") {
+      return formattedDetails ? `${detail} ${formattedDetails}` : detail;
+    }
+    return fallback;
   };
 
   const handleUpload = async (file) => {
@@ -403,7 +416,9 @@ export default function ApplicationDetail() {
     form.append("title", file.name);
 
     try {
-      await apiClient.post("/admin/documents/upload", form);
+      await apiClient.post("/admin/documents/upload", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       toast.success(`"${file.name}" uploaded; ingestion has been queued.`);
       // Refresh documents
       const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
