@@ -91,6 +91,7 @@ def create_lifespan(settings, session_factory):
                     application=app,
                     worker_id=worker_id,
                     stale_after_minutes=settings.ingestion_stale_after_minutes,
+                    ingestion_timeout_seconds=settings.ingestion_timeout_seconds,
                 )
             )
             for worker_id in range(1, settings.document_ingestion_concurrency + 1)

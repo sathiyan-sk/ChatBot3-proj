@@ -90,6 +90,7 @@ class Settings:
     chat_history_retention_days: int = 30
     ingestion_stale_after_minutes: int = 15
     document_ingestion_concurrency: int = 1
+    ingestion_timeout_seconds: int = 300
 
 def load_settings() -> Settings:
     provider_timeout_seconds = float(
@@ -298,6 +299,10 @@ def load_settings() -> Settings:
         document_ingestion_concurrency=max(
             1,
             min(8, int(os.getenv("DOCUMENT_INGESTION_CONCURRENCY", "1"))),
+        ),
+        ingestion_timeout_seconds=max(
+            30,
+            int(os.getenv("INGESTION_TIMEOUT_SECONDS", "300")),
         ),
     )
 

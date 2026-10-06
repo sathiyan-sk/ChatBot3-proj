@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import multiprocessing
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import (
@@ -295,6 +297,7 @@ async def run_document_ingestion_worker(
     worker_id: int,
     stale_after_minutes: int = 120,
     poll_interval_seconds: float = 2.0,
+    ingestion_timeout_seconds: int | None = None,
 ) -> None:
     logger.info("Document ingestion worker started", extra={"worker_id": worker_id})
     while True:
@@ -308,11 +311,18 @@ async def run_document_ingestion_worker(
                 await asyncio.sleep(poll_interval_seconds)
                 continue
 
+            timeout_value = (
+                ingestion_timeout_seconds
+                if ingestion_timeout_seconds is not None
+                else getattr(application.state.settings, "ingestion_timeout_seconds", 300)
+            )
+
             task = asyncio.create_task(
                 asyncio.to_thread(
-                    run_document_ingestion_task,
+                    _execute_document_ingestion_with_timeout,
                     document_id,
                     application,
+                    timeout_seconds=timeout_value,
                 )
             )
             while not task.done():
@@ -368,6 +378,119 @@ def touch_document_ingestion_heartbeat(
         raise
     finally:
         session.close()
+
+
+def _mark_document_failed_and_log(
+    session_factory,
+    document_id: str,
+    reason: str,
+) -> None:
+    session: Session | None = None
+    try:
+        session = session_factory()
+        service = get_document_application_service(
+            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=session_factory))),
+            session=session,
+        )
+        service.mark_failed(
+            MarkDocumentFailedCommand(
+                document_id=document_id,
+                failure_reason=reason,
+            )
+        )
+        session.commit()
+        logger.error(
+            "Document ingestion failed and was marked failed",
+            extra={
+                "document_id": document_id,
+                "failure_reason": reason,
+            },
+        )
+    except Exception:
+        if session is not None:
+            _safe_rollback(session)
+        logger.exception(
+            "Could not mark document as failed after timeout",
+            extra={"document_id": document_id},
+        )
+    finally:
+        if session is not None:
+            session.close()
+
+
+def _run_document_ingestion_task_in_subprocess(
+    document_id: str,
+    queue: object | None = None,
+) -> None:
+    try:
+        run_document_ingestion_task(document_id)
+        if queue is not None:
+            queue.put(("success", None))
+    except Exception as exc:
+        if queue is not None:
+            queue.put(("error", str(exc)))
+        raise
+
+
+def _execute_document_ingestion_with_timeout(
+    document_id: str,
+    application: object,
+    *,
+    timeout_seconds: int,
+) -> None:
+    if timeout_seconds <= 0:
+        timeout_seconds = 300
+
+    context = multiprocessing.get_context("spawn")
+    queue_factory = getattr(context, "Queue", None) or multiprocessing.Queue
+    queue = queue_factory()
+    process = context.Process(
+        target=_run_document_ingestion_task_in_subprocess,
+        args=(document_id, queue),
+    )
+    process.start()
+    process.join(timeout=timeout_seconds)
+
+    if process.is_alive():
+        logger.warning(
+            "Document ingestion exceeded timeout; terminating worker process",
+            extra={
+                "document_id": document_id,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+        process.terminate()
+        process.join(5)
+        session_factory = getattr(application.state, "session_factory", None)
+        if session_factory is not None:
+            _mark_document_failed_and_log(
+                session_factory,
+                document_id,
+                f"Document ingestion timed out after {timeout_seconds} seconds.",
+            )
+        raise TimeoutError(
+            f"Document ingestion timed out after {timeout_seconds} seconds."
+        )
+
+    if process.exitcode not in (0, None):
+        session_factory = getattr(application.state, "session_factory", None)
+        if session_factory is not None:
+            _mark_document_failed_and_log(
+                session_factory,
+                document_id,
+                f"Document ingestion process exited unexpectedly with code {process.exitcode}.",
+            )
+        raise RuntimeError(
+            f"Document ingestion process exited unexpectedly with code {process.exitcode}."
+        )
+
+    try:
+        if not queue.empty():
+            status, payload = queue.get_nowait()
+            if status == "error":
+                raise RuntimeError(payload or "document ingestion failed")
+    except Exception:
+        pass
 
 
 def run_document_ingestion_task(
