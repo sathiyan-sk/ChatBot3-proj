@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Request,
     status,
 )
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -23,6 +25,7 @@ from app.api.schemas.ingestion import (
     IngestionResponse,
     StartIngestionRequest,
 )
+from app.infrastructure.db.models.document_model import DocumentModel
 from app.knowledge_engine.shared.models import (
     KnowledgeIngestionPipelineRequest,
 )
@@ -241,22 +244,152 @@ def _get_app_session_factory(app: object):
     return session_factory
 
 
+def claim_next_pending_document(
+    session_factory,
+    stale_after_minutes: int = 120,
+) -> str | None:
+    session: Session = session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        stale_before = now - timedelta(minutes=stale_after_minutes)
+        document = session.execute(
+            select(DocumentModel)
+            .where(
+                or_(
+                    DocumentModel.status == "pending",
+                    and_(
+                        DocumentModel.status == "processing",
+                        DocumentModel.updated_at < stale_before,
+                    ),
+                )
+            )
+            .order_by(DocumentModel.created_at.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).scalar_one_or_none()
+        if document is None:
+            return None
+
+        was_stale = document.status == "processing"
+        document.status = "processing"
+        document.failure_reason = None
+        document.updated_at = datetime.now(timezone.utc)
+        document_id = str(document.id)
+        session.commit()
+        logger.info(
+            "Claimed document ingestion job",
+            extra={"document_id": document_id, "reclaimed_stale_job": was_stale},
+        )
+        return document_id
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+async def run_document_ingestion_worker(
+    session_factory,
+    *,
+    application: object,
+    worker_id: int,
+    stale_after_minutes: int = 120,
+    poll_interval_seconds: float = 2.0,
+) -> None:
+    logger.info("Document ingestion worker started", extra={"worker_id": worker_id})
+    while True:
+        try:
+            document_id = await asyncio.to_thread(
+                claim_next_pending_document,
+                session_factory,
+                stale_after_minutes,
+            )
+            if document_id is None:
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    run_document_ingestion_task,
+                    document_id,
+                    application,
+                )
+            )
+            while not task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(task),
+                        timeout=30,
+                    )
+                except asyncio.TimeoutError:
+                    try:
+                        await asyncio.to_thread(
+                            touch_document_ingestion_heartbeat,
+                            session_factory,
+                            document_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Could not update document ingestion heartbeat",
+                            extra={"document_id": document_id},
+                        )
+            await task
+        except asyncio.CancelledError:
+            logger.info(
+                "Document ingestion worker stopped",
+                extra={"worker_id": worker_id},
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "Document ingestion worker iteration failed",
+                extra={"worker_id": worker_id},
+            )
+            await asyncio.sleep(poll_interval_seconds)
+
+
+def touch_document_ingestion_heartbeat(
+    session_factory,
+    document_id: str,
+) -> None:
+    session: Session = session_factory()
+    try:
+        session.execute(
+            update(DocumentModel)
+            .where(
+                DocumentModel.id == UUID(document_id),
+                DocumentModel.status == "processing",
+            )
+            .values(updated_at=datetime.now(timezone.utc))
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def run_document_ingestion_task(
     document_id: str,
+    application: object | None = None,
 ) -> None:
     from types import SimpleNamespace
 
-    from app.main import app
+    if application is None:
+        from app.main import app as application
 
-    request_context = SimpleNamespace(app=app)
-    session_factory = _get_app_session_factory(app)
-    session: Session = session_factory()
-    logger.info(
-        "Document ingestion task started",
-        extra={"document_id": document_id},
-    )
+    request_context = SimpleNamespace(app=application)
+    session_factory = None
+    session: Session | None = None
 
     try:
+        session_factory = _get_app_session_factory(application)
+        session = session_factory()
+        logger.info(
+            "Document ingestion task started",
+            extra={"document_id": document_id},
+        )
         document_service = get_document_application_service(
             request=request_context,
             session=session,
@@ -331,7 +464,10 @@ def run_document_ingestion_task(
 
         failure_session: Session | None = None
         try:
-            _safe_rollback(session)
+            if session is not None:
+                _safe_rollback(session)
+            if session_factory is None:
+                session_factory = _get_app_session_factory(application)
             failure_session = session_factory()
             failed_document_service = get_document_application_service(
                 request=request_context,
@@ -366,15 +502,16 @@ def run_document_ingestion_task(
         return
 
     finally:
-        try:
-            session.close()
-        except Exception:
-            logger.exception(
-                "Could not close ingestion database session.",
-                extra={
-                    "document_id": document_id,
-                },
-            )
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                logger.exception(
+                    "Could not close ingestion database session.",
+                    extra={
+                        "document_id": document_id,
+                    },
+                )
 
 
 @router.post(
@@ -384,7 +521,6 @@ status_code=status.HTTP_202_ACCEPTED,
 )
 def start_ingestion(
     payload: StartIngestionRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
 ) -> IngestionResponse:
     session_factory = _get_app_session_factory(request.app)
@@ -413,11 +549,7 @@ def start_ingestion(
                         "message": "This document is already processing. Retry after the configured stale-job timeout if it remains stuck.",
                     },
                 )
-        document_service.mark_processing(
-            MarkDocumentProcessingCommand(
-                document_id=payload.document_id,
-            )
-        )
+        document_service.mark_pending(payload.document_id)
         session.commit()
     except HTTPException:
         _safe_rollback(session)
@@ -478,11 +610,6 @@ def start_ingestion(
         ) from exc
     finally:
         session.close()
-
-    background_tasks.add_task(
-        run_document_ingestion_task,
-        str(payload.document_id),
-    )
 
     return IngestionResponse(
         document_id=str(payload.document_id),

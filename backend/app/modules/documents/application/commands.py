@@ -27,6 +27,11 @@ class MarkDocumentProcessingCommand:
 
 
 @dataclass(slots=True, frozen=True)
+class MarkDocumentPendingCommand:
+    document_id: str
+
+
+@dataclass(slots=True, frozen=True)
 class MarkDocumentReadyCommand:
     document_id: str
 

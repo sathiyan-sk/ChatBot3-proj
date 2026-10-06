@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin.ingestion import run_document_ingestion_worker
 from app.api.dependencies import get_knowledge_ingestion_pipeline
 from app.api.dynamic_cors import register_dynamic_cors_middleware
 from app.api.error_handlers import register_exception_handlers
@@ -77,6 +78,22 @@ def create_lifespan(settings, session_factory):
             get_knowledge_ingestion_pipeline
         )
 
+        ingestion_workers = [
+            asyncio.create_task(
+                run_document_ingestion_worker(
+                    session_factory,
+                    application=app,
+                    worker_id=worker_id,
+                    stale_after_minutes=settings.ingestion_stale_after_minutes,
+                )
+            )
+            for worker_id in range(1, settings.document_ingestion_concurrency + 1)
+        ]
+        logger.info(
+            "Started %s document ingestion worker(s)",
+            len(ingestion_workers),
+        )
+
         try:
             deleted_count = await asyncio.to_thread(
                 _cleanup_expired_conversations,
@@ -103,6 +120,9 @@ def create_lifespan(settings, session_factory):
                 await retention_task
             except asyncio.CancelledError:
                 pass
+            for worker in ingestion_workers:
+                worker.cancel()
+            await asyncio.gather(*ingestion_workers, return_exceptions=True)
     
     return lifespan
 

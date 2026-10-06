@@ -88,7 +88,8 @@ class Settings:
     cors_allowed_origins: tuple[str, ...] = ()
     cors_allow_local_origins: bool = True
     chat_history_retention_days: int = 30
-    ingestion_stale_after_minutes: int = 120
+    ingestion_stale_after_minutes: int = 15
+    document_ingestion_concurrency: int = 1
 
 def load_settings() -> Settings:
     provider_timeout_seconds = float(
@@ -292,7 +293,11 @@ def load_settings() -> Settings:
         ),
         ingestion_stale_after_minutes=max(
             1,
-            int(os.getenv("INGESTION_STALE_AFTER_MINUTES", "120")),
+            int(os.getenv("INGESTION_STALE_AFTER_MINUTES", "15")),
+        ),
+        document_ingestion_concurrency=max(
+            1,
+            min(8, int(os.getenv("DOCUMENT_INGESTION_CONCURRENCY", "1"))),
         ),
     )
 

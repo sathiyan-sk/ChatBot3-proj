@@ -41,10 +41,10 @@ class DocumentApplicationService:
     storage_provider: object | None = None
 
     _ALLOWED_TRANSITIONS: ClassVar[dict[str, set[str]]] = {
-        "pending": {"processing", "failed", "archived"},
-        "processing": {"processing", "ready", "failed", "archived"},
-        "ready": {"archived", "processing"},
-        "failed": {"processing", "archived"},
+        "pending": {"pending", "processing", "failed", "archived"},
+        "processing": {"pending", "processing", "ready", "failed", "archived"},
+        "ready": {"pending", "archived", "processing"},
+        "failed": {"pending", "processing", "archived"},
         "archived": set(),
     }
     def create(
@@ -254,6 +254,13 @@ class DocumentApplicationService:
         return self._change_status(
             document_id=command.document_id,
             status="processing",
+            failure_reason=None,
+        )
+
+    def mark_pending(self, document_id: str) -> DocumentDto:
+        return self._change_status(
+            document_id=document_id,
+            status="pending",
             failure_reason=None,
         )
 

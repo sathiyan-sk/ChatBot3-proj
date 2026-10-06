@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -18,7 +16,6 @@ from fastapi import (
     status,
 )
 
-from app.api.admin.ingestion import run_document_ingestion_task
 from app.api.dependencies import (
     get_document_application_service,
     get_settings,
@@ -64,29 +61,12 @@ SUPPORTED_UPLOAD_EXTENSIONS = frozenset(
 )
 
 
-def _is_ingestion_stale(
-    updated_at: datetime,
-    *,
-    now: datetime,
-    stale_after_minutes: int,
-) -> bool:
-    normalized_updated_at = updated_at
-    if normalized_updated_at.tzinfo is None:
-        normalized_updated_at = normalized_updated_at.replace(
-            tzinfo=timezone.utc,
-        )
-    return now - normalized_updated_at >= timedelta(
-        minutes=stale_after_minutes,
-    )
-
-
 @router.post(
     "/upload",
     response_model=DocumentResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def upload_document(
-    background_tasks: BackgroundTasks,
     knowledge_base_id: UUID = Form(...),
     title: str = Form(...),
     description: str | None = Form(None),
@@ -129,11 +109,6 @@ def upload_document(
         content=content,
     )
 
-    background_tasks.add_task(
-        run_document_ingestion_task,
-        document_id=str(result.id),
-    )
-
     return DocumentResponse.model_validate(
         result,
         from_attributes=True,
@@ -147,7 +122,6 @@ def upload_document(
 )
 def create_document(
     request: CreateDocumentRequest,
-    background_tasks: BackgroundTasks,
     service: DocumentApplicationService = Depends(
         get_document_application_service,
     ),
@@ -160,11 +134,6 @@ def create_document(
             source_type=request.source_type,
             source_uri=request.source_uri or "",
         )
-    )
-
-    background_tasks.add_task(
-        run_document_ingestion_task,
-        document_id=str(result.id),
     )
 
     return DocumentResponse.model_validate(
@@ -224,27 +193,6 @@ def list_documents(
 
     else:
         results = service.list_all()
-
-    stale_after_minutes = request.app.state.settings.ingestion_stale_after_minutes
-    now = datetime.now(timezone.utc)
-    for index, document in enumerate(results):
-        if (
-            document.status == "processing"
-            and _is_ingestion_stale(
-                document.updated_at,
-                now=now,
-                stale_after_minutes=stale_after_minutes,
-            )
-        ):
-            results[index] = service.mark_failed(
-                MarkDocumentFailedCommand(
-                    document_id=str(document.id),
-                    failure_reason=(
-                        "Ingestion did not finish within "
-                        f"{stale_after_minutes} minutes. Retry this document."
-                    ),
-                )
-            )
 
     return [
         DocumentResponse.model_validate(
