@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from app.config.settings import get_settings
 
@@ -26,4 +26,17 @@ def get_system_config() -> dict[str, str]:
         "ollama_chat_model": settings.ollama.llm_model_name,
         "ollama_embed_model": settings.ollama.embedding_model_name,
         "vector_store_table_name": settings.vector_store_table_name,
+    }
+
+
+@router.get(
+    "/ingestion-workers",
+    status_code=status.HTTP_200_OK,
+)
+def get_ingestion_worker_status(request: Request) -> dict[str, int | bool]:
+    workers = getattr(request.app.state, "ingestion_workers", [])
+    return {
+        "worker_count": len(workers),
+        "running_workers": sum(not worker.done() for worker in workers),
+        "healthy": bool(workers) and all(not worker.done() for worker in workers),
     }

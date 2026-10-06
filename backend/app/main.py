@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -21,6 +22,11 @@ from app.modules.conversations.infrastructure.repositories import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_application_logging() -> None:
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.getLogger().setLevel(getattr(logging, level_name, logging.INFO))
 
 
 def _cleanup_expired_conversations(session_factory, default_retention_days: int) -> int:
@@ -89,9 +95,13 @@ def create_lifespan(settings, session_factory):
             )
             for worker_id in range(1, settings.document_ingestion_concurrency + 1)
         ]
+        app.state.ingestion_workers = ingestion_workers
         logger.info(
-            "Started %s document ingestion worker(s)",
-            len(ingestion_workers),
+            "Started document ingestion workers",
+            extra={
+                "worker_count": len(ingestion_workers),
+                "stale_after_minutes": settings.ingestion_stale_after_minutes,
+            },
         )
 
         try:
@@ -128,6 +138,7 @@ def create_lifespan(settings, session_factory):
 
 
 def create_app() -> FastAPI:
+    _configure_application_logging()
     settings = get_settings()
     session_factory = create_session_factory(settings.database.url)
 

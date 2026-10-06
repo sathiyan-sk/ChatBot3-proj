@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from sqlalchemy.dialects import postgresql
+
 from app.api.admin.ingestion import claim_next_pending_document
+from app.api.system import get_ingestion_worker_status
 
 
 class _ClaimResult:
@@ -19,9 +22,11 @@ class _ClaimSession:
         self.committed = False
         self.closed = False
         self.skip_locked = False
+        self.sql = ""
 
     def execute(self, statement):
         self.skip_locked = statement._for_update_arg.skip_locked
+        self.sql = str(statement.compile(dialect=postgresql.dialect()))
         return _ClaimResult(self.document)
 
     def commit(self):
@@ -47,6 +52,8 @@ def test_claim_marks_pending_document_processing_with_skip_locked():
 
     assert document_id == str(document.id)
     assert session.skip_locked
+    assert "FOR UPDATE SKIP LOCKED" in session.sql
+    assert "documents.status" in session.sql
     assert session.committed
     assert session.closed
     assert document.status == "processing"
@@ -82,3 +89,26 @@ def test_claim_reclaims_expired_processing_document():
     assert session.closed
     assert document.status == "processing"
     assert document.updated_at > datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def test_worker_health_endpoint_reports_running_and_failed_workers():
+    class Worker:
+        def __init__(self, is_done):
+            self._is_done = is_done
+
+        def done(self):
+            return self._is_done
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                ingestion_workers=[Worker(False), Worker(True)]
+            )
+        )
+    )
+
+    assert get_ingestion_worker_status(request) == {
+        "worker_count": 2,
+        "running_workers": 1,
+        "healthy": False,
+    }
