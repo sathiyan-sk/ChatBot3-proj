@@ -11,14 +11,12 @@ class ActiveProviders:
     embeddings: str
     vector: str
     storage: str
-    parsing: str
 
 
 def build_active_providers(settings: ProviderSettings) -> ActiveProviders:
     return ActiveProviders(
-        llm=settings.active_llm_provider,
-        embeddings=settings.active_embedding_provider,
-        vector=settings.active_vector_provider,
-        storage=settings.active_storage_provider,
-        parsing=settings.active_parsing_provider,
+        llm=settings.llm,
+        embeddings=settings.embeddings,
+        vector=settings.vector,
+        storage=settings.storage,
     )

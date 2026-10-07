@@ -1,17 +1,18 @@
-import os
-import sys
-from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from io import BytesIO
+from types import SimpleNamespace
+
+import pytest
+import pymupdf
+from docx import Document
 
 from app.api.admin.documents import SUPPORTED_UPLOAD_EXTENSIONS
+from app.api.admin.ingestion import _resolve_source_type
 from app.api.dependencies import get_knowledge_ingestion_pipeline
-from app.config.settings import load_settings
-from app.infrastructure.providers.parsing.docling_provider import DoclingParsingProvider
-from app.infrastructure.providers.parsing.fallback_provider import (
-    FallbackParsingProvider,
-)
 from app.infrastructure.providers.parsing.pymupdf_provider import (
     PyMuPDFParsingProvider,
+)
+from app.infrastructure.providers.parsing.python_docx_provider import (
+    PythonDocxParsingProvider,
 )
 from app.knowledge_engine.ingestion.parsers.csv_parser import CsvDocumentParser
 from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
@@ -20,14 +21,12 @@ from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
 from app.knowledge_engine.ingestion.parsers.text_parser import TextDocumentParser
 from app.knowledge_engine.ingestion.source_loaders.file_loader import FileSourceLoader
 from app.knowledge_engine.shared.models import RawSource
-from app.knowledge_engine.shared.models import ParsedDocument
 
 
-def _pipeline_for(source_type: str, parsing_provider: str = "pymupdf"):
+def _pipeline_for(source_type: str):
     settings = SimpleNamespace(
         providers=SimpleNamespace(
             embeddings="nomic",
-            parsing=parsing_provider,
         ),
         storage=SimpleNamespace(),
         openrouter=SimpleNamespace(),
@@ -44,12 +43,37 @@ def _pipeline_for(source_type: str, parsing_provider: str = "pymupdf"):
     )
 
 
-def test_docx_uses_structured_parser_instead_of_utf8_text_decoder():
+def test_docx_uses_python_docx_parser():
     pipeline = _pipeline_for("docx")
 
     assert isinstance(pipeline.source_loader, FileSourceLoader)
     assert isinstance(pipeline.parser, StructuredDocumentParser)
-    assert isinstance(pipeline.parser.parsing_contract, DoclingParsingProvider)
+    assert isinstance(
+        pipeline.parser.parsing_contract,
+        PythonDocxParsingProvider,
+    )
+
+
+def test_python_docx_parser_extracts_paragraphs_and_table_rows():
+    document = Document()
+    document.add_paragraph("Clinic project overview")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Service"
+    table.cell(0, 1).text = "Hours"
+    buffer = BytesIO()
+    document.save(buffer)
+
+    parsed = PythonDocxParsingProvider().parse(
+        RawSource(
+            source_type="file",
+            source_identifier="clinic.docx",
+            content_bytes=buffer.getvalue(),
+        )
+    )
+
+    assert "Clinic project overview" in parsed.content
+    assert "Service | Hours" in parsed.content
+    assert parsed.metadata["parser"] == "python-docx"
 
 
 def test_plain_text_formats_keep_text_parser():
@@ -67,25 +91,59 @@ def test_csv_keeps_text_source_loader():
     assert isinstance(pipeline.parser, CsvDocumentParser)
 
 
-def test_pdf_parser_selector_controls_primary_and_fallback_order():
-    docling_pipeline = _pipeline_for("pdf", "docling")
-    pymupdf_pipeline = _pipeline_for("pdf", "pymupdf")
+def test_pdf_uses_pymupdf_directly_without_fallback():
+    pipeline = _pipeline_for("pdf")
 
-    docling_contract = docling_pipeline.parser.parsing_contract
-    pymupdf_contract = pymupdf_pipeline.parser.parsing_contract
-
-    assert isinstance(docling_contract, FallbackParsingProvider)
-    assert isinstance(docling_contract.primary, DoclingParsingProvider)
-    assert isinstance(docling_contract.fallback, PyMuPDFParsingProvider)
-    assert isinstance(pymupdf_contract, FallbackParsingProvider)
-    assert isinstance(pymupdf_contract.primary, PyMuPDFParsingProvider)
-    assert isinstance(pymupdf_contract.fallback, DoclingParsingProvider)
+    assert isinstance(pipeline.source_loader, FileSourceLoader)
+    assert isinstance(pipeline.parser, StructuredDocumentParser)
+    assert isinstance(pipeline.parser.parsing_contract, PyMuPDFParsingProvider)
 
 
-def test_pymupdf_is_the_default_pdf_parser_setting():
-    with patch.dict(os.environ):
-        os.environ.pop("PARSING_PROVIDER", None)
-        assert load_settings().providers.parsing == "pymupdf"
+def test_pymupdf_extracts_text_from_pdf_bytes():
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Knowledge base PDF fixture")
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+
+    parsed = PyMuPDFParsingProvider().parse(
+        RawSource(
+            source_type="file",
+            source_identifier="guide.pdf",
+            content_bytes=pdf_bytes,
+        )
+    )
+
+    assert "Knowledge base PDF fixture" in parsed.content
+    assert parsed.metadata["parser"] == "pymupdf"
+
+
+@pytest.mark.parametrize(
+    ("extension", "expected_type"),
+    [
+        ("pdf", "pdf"),
+        ("docx", "docx"),
+        ("txt", "txt"),
+        ("csv", "csv"),
+        ("json", "json"),
+        ("md", "md"),
+    ],
+)
+def test_uploaded_file_type_is_resolved_from_storage_path(extension, expected_type):
+    document = SimpleNamespace(source_type="file")
+
+    assert (
+        _resolve_source_type(
+            document,
+            f"kb/document/source.{extension}",
+        )
+        == expected_type
+    )
+
+
+def test_unsupported_office_format_fails_fast():
+    with pytest.raises(ValueError, match="Unsupported ingestion source type: xlsx"):
+        _pipeline_for("xlsx")
 
 
 def test_csv_rows_keep_column_names_with_values():
@@ -113,35 +171,6 @@ def test_csv_parser_handles_utf8_bom():
     assert "plan: Basic" in parsed.content
 
 
-def test_pdf_parser_falls_back_when_primary_fails():
-    parsed_document = ParsedDocument(
-        title="guide.pdf",
-        content="Fallback text",
-        sections=["Fallback text"],
-    )
-
-    class FailedParser:
-        def parse(self, _source):
-            raise RuntimeError("primary parser failed")
-
-    class WorkingParser:
-        def parse(self, _source):
-            return parsed_document
-
-    result = FallbackParsingProvider(
-        primary=FailedParser(),
-        fallback=WorkingParser(),
-    ).parse(
-        RawSource(
-            source_type="file",
-            source_identifier="guide.pdf",
-            content_bytes=b"document bytes",
-        )
-    )
-
-    assert result == parsed_document
-
-
 def test_upload_api_supports_the_formats_shown_in_the_registry():
     assert SUPPORTED_UPLOAD_EXTENSIONS == {
         ".pdf",
@@ -153,52 +182,3 @@ def test_upload_api_supports_the_formats_shown_in_the_registry():
     }
 
 
-def test_docling_configures_the_docx_input_format():
-    input_format = object()
-    captured = {}
-
-    class FakeDocumentStream:
-        def __init__(self, *, name, stream):
-            self.name = name
-            self.stream = stream
-
-    class FakeDocumentConverter:
-        def __init__(self, *, allowed_formats):
-            captured["allowed_formats"] = allowed_formats
-
-        def convert(self, _document_stream):
-            return SimpleNamespace(
-                document=SimpleNamespace(
-                    export_to_markdown=lambda: "Extracted DOCX text"
-                )
-            )
-
-    docling_module = ModuleType("docling")
-    datamodel_module = ModuleType("docling.datamodel")
-    base_models_module = ModuleType("docling.datamodel.base_models")
-    base_models_module.DocumentStream = FakeDocumentStream
-    base_models_module.InputFormat = SimpleNamespace(
-        DOCX=input_format,
-        PDF=object(),
-    )
-    converter_module = ModuleType("docling.document_converter")
-    converter_module.DocumentConverter = FakeDocumentConverter
-
-    modules = {
-        "docling": docling_module,
-        "docling.datamodel": datamodel_module,
-        "docling.datamodel.base_models": base_models_module,
-        "docling.document_converter": converter_module,
-    }
-
-    with patch.dict(sys.modules, modules):
-        parsed = DoclingParsingProvider().parse(
-            RawSource(
-                source_type="file",
-                source_identifier="guide.docx",
-                content_bytes=b"docx bytes",
-            )
-        )
-
-    assert captured["allowed_formats"] == [input_format]
-    assert parsed.content == "Extracted DOCX text"

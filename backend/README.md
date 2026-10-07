@@ -385,7 +385,8 @@ finalized application structure:
     │   │   ├── s3_storage_provider.py
     │   │   └── azure_blob_storage_provider.py
     │   └── parsing/
-    │       ├── docling_provider.py
+    │       ├── pymupdf_provider.py
+    │       ├── python_docx_provider.py
     │       ├── html_parsing_provider.py
     │       └── ocr_provider.py
     ├── security/

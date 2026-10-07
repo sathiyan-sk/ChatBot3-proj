@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, status
 
-from app.config.settings import get_settings
-
 router = APIRouter(prefix="/system", tags=["System"])
 
 
@@ -11,8 +9,8 @@ router = APIRouter(prefix="/system", tags=["System"])
     "/config",
     status_code=status.HTTP_200_OK,
 )
-def get_system_config() -> dict[str, str]:
-    settings = get_settings()
+def get_system_config(request: Request) -> dict[str, str]:
+    settings = request.app.state.settings
     return {
         "status": "ok",
         "app_name": settings.app.app_name,
@@ -22,7 +20,7 @@ def get_system_config() -> dict[str, str]:
         "provider_embeddings": settings.providers.embeddings,
         "provider_vector": settings.providers.vector,
         "provider_storage": settings.providers.storage,
-        "provider_parsing": settings.providers.parsing,
+        "provider_parsing": "pymupdf,python-docx",
         "ollama_chat_model": settings.ollama.llm_model_name,
         "ollama_embed_model": settings.ollama.embedding_model_name,
         "vector_store_table_name": settings.vector_store_table_name,

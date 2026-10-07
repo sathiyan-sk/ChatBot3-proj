@@ -579,6 +579,18 @@ def run_document_ingestion_task(
             request=request_context,
             session=session,
         )
+        parsing_contract = getattr(
+            ingestion_pipeline.parser,
+            "parsing_contract",
+            None,
+        )
+        logger.info(
+            "Resolved ingestion parser: document_id=%s source_type=%s parser=%s provider=%s",
+            document_id,
+            source_type,
+            type(ingestion_pipeline.parser).__name__,
+            type(parsing_contract).__name__ if parsing_contract is not None else "none",
+        )
 
         pipeline_request = _build_pipeline_request(
             document=document,

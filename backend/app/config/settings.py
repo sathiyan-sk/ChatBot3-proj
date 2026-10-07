@@ -57,7 +57,6 @@ class ProviderSettings:
     embeddings: str
     vector: str
     storage: str
-    parsing: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -180,10 +179,6 @@ def load_settings() -> Settings:
             storage=os.getenv(
                 "STORAGE_PROVIDER",
                 "supabase",
-            ),
-            parsing=os.getenv(
-                "PARSING_PROVIDER",
-                "pymupdf",
             ),
         ),
         storage=StorageSettings(

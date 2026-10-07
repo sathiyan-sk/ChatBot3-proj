@@ -484,7 +484,7 @@ export default function ApplicationDetail() {
       setDeleteTarget(null);
     } catch (e) {
       console.error(e);
-      toast.error("Un-indexing file failed.");
+      toast.error(getDocumentActionError(e, "Un-indexing file failed."));
     } finally {
       setIsDeleting(false);
     }

@@ -19,18 +19,15 @@ from app.infrastructure.providers.llm.ollama_provider import OllamaLlmProvider
 from app.infrastructure.providers.llm.openrouter_provider import (
     OpenRouterLlmProvider,
 )
-from app.infrastructure.providers.parsing.docling_provider import (
-    DoclingParsingProvider,
-)
-from app.infrastructure.providers.parsing.fallback_provider import (
-    FallbackParsingProvider,
-)
 from app.infrastructure.providers.parsing.html_parsing_provider import (
     HtmlParsingProvider,
 )
 from app.infrastructure.providers.parsing.ocr_provider import OcrParsingProvider
 from app.infrastructure.providers.parsing.pymupdf_provider import (
     PyMuPDFParsingProvider,
+)
+from app.infrastructure.providers.parsing.python_docx_provider import (
+    PythonDocxParsingProvider,
 )
 from app.infrastructure.providers.storage.supabase_storage_provider import (
     SupabaseStorageProvider,
@@ -374,26 +371,11 @@ def get_knowledge_ingestion_pipeline(
     )
 
     if source_type == "pdf":
-        parsing_provider = settings.providers.parsing.strip().lower()
-        if parsing_provider == "docling":
-            primary_parser = DoclingParsingProvider()
-            fallback_parser = PyMuPDFParsingProvider()
-        elif parsing_provider == "pymupdf":
-            primary_parser = PyMuPDFParsingProvider()
-            fallback_parser = DoclingParsingProvider()
-        else:
-            raise ValueError(
-                "PARSING_PROVIDER must be either 'docling' or 'pymupdf'."
-            )
-
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
         parser = StructuredDocumentParser(
-            parsing_contract=FallbackParsingProvider(
-                primary=primary_parser,
-                fallback=fallback_parser,
-            ),
+            parsing_contract=PyMuPDFParsingProvider(),
         )
 
     elif source_type in {"txt", "text", "md", "markdown", "json"}:
@@ -403,13 +385,13 @@ def get_knowledge_ingestion_pipeline(
 
         parser = TextDocumentParser()
 
-    elif source_type in {"doc", "docx", "xls", "xlsx", "ppt", "pptx"}:
+    elif source_type == "docx":
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
 
         parser = StructuredDocumentParser(
-            parsing_contract=DoclingParsingProvider(),
+            parsing_contract=PythonDocxParsingProvider(),
         )
 
     elif source_type == "website":
@@ -440,12 +422,8 @@ def get_knowledge_ingestion_pipeline(
         )
 
     else:
-        source_loader = FileSourceLoader(
-            storage_contract=storage_provider,
-        )
-
-        parser = StructuredDocumentParser(
-            parsing_contract=DoclingParsingProvider(),
+        raise ValueError(
+            f"Unsupported ingestion source type: {source_type}."
         )
 
     return KnowledgeIngestionPipeline(
