@@ -384,12 +384,20 @@ def _mark_document_failed_and_log(
     session_factory,
     document_id: str,
     reason: str,
+    settings: object,
 ) -> None:
     session: Session | None = None
     try:
         session = session_factory()
         service = get_document_application_service(
-            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=session_factory))),
+            request=SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        session_factory=session_factory,
+                        settings=settings,
+                    )
+                )
+            ),
             session=session,
         )
         service.mark_failed(
@@ -422,14 +430,31 @@ def _run_document_ingestion_task_in_subprocess(
     document_id: str,
     queue: object | None = None,
 ) -> None:
+    session_factory = None
     try:
-        run_document_ingestion_task(document_id)
+        from app.config.settings import get_settings
+        from app.infrastructure.db.session import create_session_factory
+
+        settings = get_settings()
+        session_factory = create_session_factory(settings.database.url)
+        application = SimpleNamespace(
+            state=SimpleNamespace(
+                settings=settings,
+                session_factory=session_factory,
+            )
+        )
+        run_document_ingestion_task(document_id, application)
         if queue is not None:
             queue.put(("success", None))
     except Exception as exc:
         if queue is not None:
             queue.put(("error", str(exc)))
         raise
+    finally:
+        if session_factory is not None:
+            bind = getattr(session_factory, "kw", {}).get("bind")
+            if bind is not None:
+                bind.dispose()
 
 
 def _execute_document_ingestion_with_timeout(
@@ -467,6 +492,7 @@ def _execute_document_ingestion_with_timeout(
                 session_factory,
                 document_id,
                 f"Document ingestion timed out after {timeout_seconds} seconds.",
+                application.state.settings,
             )
         raise TimeoutError(
             f"Document ingestion timed out after {timeout_seconds} seconds."
@@ -479,6 +505,7 @@ def _execute_document_ingestion_with_timeout(
                 session_factory,
                 document_id,
                 f"Document ingestion process exited unexpectedly with code {process.exitcode}.",
+                application.state.settings,
             )
         raise RuntimeError(
             f"Document ingestion process exited unexpectedly with code {process.exitcode}."

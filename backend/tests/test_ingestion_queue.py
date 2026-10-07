@@ -6,6 +6,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.api.admin.ingestion import (
     _execute_document_ingestion_with_timeout,
+    _run_document_ingestion_task_in_subprocess,
     claim_next_pending_document,
 )
 from app.api.system import get_ingestion_worker_status
@@ -107,7 +108,6 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
 
         def join(self, timeout=None):
             self.join_timeout = timeout
-            self.alive = False
 
         def is_alive(self):
             return self.alive
@@ -124,8 +124,8 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
 
     calls = {}
 
-    def fake_fail_mark(session_factory, document_id, exc):
-        calls["failed"] = (document_id, str(exc))
+    def fake_fail_mark(session_factory, document_id, reason, settings):
+        calls["failed"] = (document_id, str(reason), settings)
 
     monkeypatch.setattr(
         "app.api.admin.ingestion.multiprocessing.get_context",
@@ -156,6 +156,76 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
     assert fake_process.terminated is True
     assert calls["failed"][0] == "test-doc-id"
     assert "timed out" in calls["failed"][1].lower()
+    assert calls["failed"][2] is app.state.settings
+
+
+def test_timeout_failure_marker_provides_application_settings(monkeypatch):
+    settings = SimpleNamespace(storage=object())
+    observed = {}
+
+    class FakeSession:
+        def commit(self):
+            observed["committed"] = True
+
+        def close(self):
+            observed["closed"] = True
+
+    class FakeService:
+        def mark_failed(self, command):
+            observed["command"] = command
+
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.get_document_application_service",
+        lambda request, session: (
+            observed.update(settings=request.app.state.settings) or FakeService()
+        ),
+    )
+
+    from app.api.admin.ingestion import _mark_document_failed_and_log
+
+    _mark_document_failed_and_log(
+        lambda: FakeSession(),
+        "test-doc-id",
+        "timeout",
+        settings,
+    )
+
+    assert observed["settings"] is settings
+    assert observed["committed"] is True
+    assert observed["closed"] is True
+
+
+def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
+    settings = SimpleNamespace(
+        database=SimpleNamespace(url="postgresql://test")
+    )
+    factory = SimpleNamespace(kw={"bind": None})
+    observed = {}
+
+    monkeypatch.setattr(
+        "app.config.settings.get_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.db.session.create_session_factory",
+        lambda database_url: factory,
+    )
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.run_document_ingestion_task",
+        lambda document_id, application: observed.update(
+            document_id=document_id,
+            settings=application.state.settings,
+            session_factory=application.state.session_factory,
+        ),
+    )
+
+    _run_document_ingestion_task_in_subprocess("test-doc-id")
+
+    assert observed == {
+        "document_id": "test-doc-id",
+        "settings": settings,
+        "session_factory": factory,
+    }
 
 
 def test_worker_health_endpoint_reports_running_and_failed_workers():
