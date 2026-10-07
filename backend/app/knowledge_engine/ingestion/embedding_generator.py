@@ -15,9 +15,27 @@ class EmbeddingGenerator:
 
     def generate(self, chunks: list[DocumentChunk]) -> list[EmbeddedChunk]:
         embedded_chunks: list[EmbeddedChunk] = []
+        embed_documents = getattr(
+            self.embeddings_contract,
+            "embed_documents",
+            None,
+        )
+        if callable(embed_documents):
+            embeddings = embed_documents([chunk.content for chunk in chunks])
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    "Embedding provider returned a different number of vectors than chunks."
+                )
+        else:
+            embeddings = [
+                self.embeddings_contract.embed_query(chunk.content)
+                for chunk in chunks
+            ]
 
-        for index, chunk in enumerate(chunks, start=1):
-            embedding = self.embeddings_contract.embed_query(chunk.content)
+        for index, (chunk, embedding) in enumerate(
+            zip(chunks, embeddings),
+            start=1,
+        ):
             embedded_chunks.append(
                 EmbeddedChunk(
                     chunk_id=chunk.chunk_id,
