@@ -82,10 +82,10 @@ def test_pdf_parser_selector_controls_primary_and_fallback_order():
     assert isinstance(pymupdf_contract.fallback, DoclingParsingProvider)
 
 
-def test_docling_is_the_default_pdf_parser_setting():
+def test_pymupdf_is_the_default_pdf_parser_setting():
     with patch.dict(os.environ):
         os.environ.pop("PARSING_PROVIDER", None)
-        assert load_settings().providers.parsing == "docling"
+        assert load_settings().providers.parsing == "pymupdf"
 
 
 def test_csv_rows_keep_column_names_with_values():
