@@ -23,20 +23,27 @@ logger = logging.getLogger(__name__)
 def _run_ingestion_stage(stage: str, document_id: str, operation):
     started_at = time.monotonic()
     logger.info(
-        "Document ingestion stage started",
+        "Document ingestion stage started: %s (document_id=%s)",
+        stage,
+        document_id,
         extra={"document_id": document_id, "stage": stage},
     )
     try:
         result = operation()
     except Exception:
         logger.exception(
-            "Document ingestion stage failed",
+            "Document ingestion stage failed: %s (document_id=%s)",
+            stage,
+            document_id,
             extra={"document_id": document_id, "stage": stage},
         )
         raise
 
     logger.info(
-        "Document ingestion stage completed",
+        "Document ingestion stage completed: %s (document_id=%s, duration_seconds=%.3f)",
+        stage,
+        document_id,
+        time.monotonic() - started_at,
         extra={
             "document_id": document_id,
             "stage": stage,

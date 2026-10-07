@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import multiprocessing
+import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -432,6 +433,13 @@ def _run_document_ingestion_task_in_subprocess(
 ) -> None:
     session_factory = None
     try:
+        level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+        logging.basicConfig(
+            level=getattr(logging, level_name, logging.INFO),
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            force=True,
+        )
+
         from app.config.settings import get_settings
         from app.infrastructure.db.session import create_session_factory
 
