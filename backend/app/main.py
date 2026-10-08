@@ -16,7 +16,6 @@ from app.api.router import api_router
 from app.composition import build_application_container
 from app.config.settings import get_settings
 from app.infrastructure.db.session import create_session_factory
-from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
 from app.modules.conversations.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
 )
@@ -67,14 +66,6 @@ def create_lifespan(settings, session_factory):
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.session_factory = session_factory
-
-        # Ensure vector store schema exists before serving requests
-        session = session_factory()
-        try:
-            vector_provider = PgVectorProvider(settings=settings, session=session)
-            vector_provider.ensure_schema()
-        finally:
-            session.close()
 
         app.state.container = build_application_container(
             settings=settings,

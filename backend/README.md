@@ -21,6 +21,33 @@
 
 ---
 
+## Fresh PostgreSQL database
+
+The application schema is managed by Alembic. For a **new, empty PostgreSQL
+database**, set `DATABASE_URL` to that database and run this once from the
+`backend` directory before starting the API:
+
+```bash
+python -m alembic -c alembic.ini upgrade head
+```
+
+The initial revision creates the eight relational tables, enables the
+`vector` extension, and creates `document_chunks` with a 1024-dimensional
+embedding column plus cosine HNSW and full-text indexes. The PostgreSQL
+provider must support pgvector and allow `CREATE EXTENSION vector`. Keep
+`VECTOR_STORE_TABLE_NAME=document_chunks` and `VECTOR_STORE_DIMENSION=1024`
+aligned with this initial revision; changing either requires a deliberate
+follow-up migration.
+
+For Render, configure the same command as the backend service's **Pre-Deploy
+Command**. Do not run migrations on every worker startup. Verify with
+`python -m alembic -c alembic.ini current`.
+
+This initial revision is for an empty database only. It does not copy data from
+Supabase and must not be run against an existing database that already has
+these tables. The older SQL files in `migrations/` are legacy repair scripts,
+not the fresh-database bootstrap path.
+
 ## .Create project
 
 ## Render CORS configuration
