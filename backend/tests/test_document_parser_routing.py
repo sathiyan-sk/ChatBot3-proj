@@ -8,6 +8,7 @@ from docx import Document
 from app.api.admin.documents import SUPPORTED_UPLOAD_EXTENSIONS
 from app.api.admin.ingestion import _resolve_source_type
 from app.api.dependencies import get_knowledge_ingestion_pipeline
+from app.core.exceptions import ApplicationError
 from app.infrastructure.providers.parsing.pymupdf_provider import (
     PyMuPDFParsingProvider,
 )
@@ -118,6 +119,42 @@ def test_pymupdf_extracts_text_from_pdf_bytes():
     assert parsed.metadata["parser"] == "pymupdf"
 
 
+def test_scanned_pdf_without_selectable_text_fails_with_clear_error():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+
+    with pytest.raises(ApplicationError) as exc_info:
+        PyMuPDFParsingProvider().parse(
+            RawSource(
+                source_type="file",
+                source_identifier="scanned-guide.pdf",
+                content_bytes=pdf_bytes,
+            )
+        )
+
+    assert exc_info.value.code == "pdf_text_not_found"
+    assert "scanned" in exc_info.value.message.lower()
+
+
+@pytest.mark.parametrize(
+    "source_type",
+    ["txt", "md", "json"],
+)
+def test_text_upload_formats_extract_content(source_type):
+    parsed = TextDocumentParser().parse(
+        RawSource(
+            source_type=source_type,
+            source_identifier=f"guide.{source_type}",
+            content_bytes=b'{"answer": "The office opens at 9."}',
+        )
+    )
+
+    assert "office opens at 9" in parsed.content
+    assert parsed.title == f"guide.{source_type}"
+
+
 @pytest.mark.parametrize(
     ("extension", "expected_type"),
     [
@@ -180,5 +217,4 @@ def test_upload_api_supports_the_formats_shown_in_the_registry():
         ".json",
         ".md",
     }
-
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from app.knowledge_engine.shared.models import DocumentChunk
 
 
@@ -11,6 +9,11 @@ class IntelligentChunkGenerator:
         chunk_size: int = 500,
         chunk_overlap: int = 100,
     ):
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be greater than zero.")
+        if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be between zero and chunk_size - 1.")
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -38,63 +41,52 @@ class IntelligentChunkGenerator:
         if not text:
             return []  # Return empty list if no text to chunk
 
-        # Extract optional metadata from kwargs
         document_id = kwargs.get("document_id")
         metadata = kwargs.get("metadata", {})
-
-        # Split into sentences
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-
         chunks: list[DocumentChunk] = []
-        current_chunk_text = ""
-        current_chunk_index = 0
+        normalized_text = text.strip()
+        start = 0
 
-        for sentence in sentences:
-            if len(current_chunk_text) + len(sentence) <= self.chunk_size:
-                current_chunk_text += " " + sentence if current_chunk_text else sentence
-            else:
-                # Save current chunk
-                if current_chunk_text.strip():
-                    chunk_metadata = dict(metadata) if metadata else {}
-                    if document_id:
-                        chunk_metadata["document_id"] = str(document_id)
-
-                    # Chunk IDs must be globally unique: the vector store uses
-                    # chunk_id as PRIMARY KEY, so bare "chunk-0" style IDs from
-                    # different documents would overwrite each other.
-                    chunk_id_prefix = (
-                        f"{document_id}-" if document_id else ""
-                    )
-
-                    chunks.append(
-                        DocumentChunk(
-                            chunk_id=f"{chunk_id_prefix}chunk-{current_chunk_index}",
-                            content=current_chunk_text.strip(),
-                            metadata=chunk_metadata,
-                        )
-                    )
-                    current_chunk_index += 1
-
-                # Start new chunk with overlap (last 2-3 sentences)
-                overlap_sentences = re.split(r'(?<=[.!?])\s+', current_chunk_text)[-3:]
-                current_chunk_text = " ".join(overlap_sentences) + " " + sentence
-
-        # Don't forget the last chunk
-        if current_chunk_text.strip():
-            chunk_metadata = dict(metadata) if metadata else {}
-            if document_id:
-                chunk_metadata["document_id"] = str(document_id)
-
-            chunk_id_prefix = (
-                f"{document_id}-" if document_id else ""
-            )
-
-            chunks.append(
-                DocumentChunk(
-                    chunk_id=f"{chunk_id_prefix}chunk-{current_chunk_index}",
-                    content=current_chunk_text.strip(),
-                    metadata=chunk_metadata,
+        while start < len(normalized_text):
+            end = min(start + self.chunk_size, len(normalized_text))
+            if end < len(normalized_text):
+                preferred_start = start + self.chunk_size // 2
+                sentence_boundary = max(
+                    normalized_text.rfind(". ", preferred_start, end),
+                    normalized_text.rfind("! ", preferred_start, end),
+                    normalized_text.rfind("? ", preferred_start, end),
                 )
-            )
+                if sentence_boundary > start:
+                    end = sentence_boundary + 1
+                else:
+                    whitespace_boundary = normalized_text.rfind(
+                        " ",
+                        preferred_start,
+                        end,
+                    )
+                    if whitespace_boundary > start:
+                        end = whitespace_boundary
+
+            chunk_text = normalized_text[start:end].strip()
+            if chunk_text:
+                chunk_metadata = dict(metadata) if metadata else {}
+                if document_id:
+                    chunk_metadata["document_id"] = str(document_id)
+
+                chunk_id_prefix = f"{document_id}-" if document_id else ""
+                chunks.append(
+                    DocumentChunk(
+                        chunk_id=f"{chunk_id_prefix}chunk-{len(chunks)}",
+                        content=chunk_text,
+                        metadata=chunk_metadata,
+                    )
+                )
+
+            if end >= len(normalized_text):
+                break
+
+            next_start = max(start + 1, end - self.chunk_overlap)
+            next_whitespace = normalized_text.find(" ", next_start, end)
+            start = next_whitespace + 1 if next_whitespace >= 0 else next_start
 
         return chunks

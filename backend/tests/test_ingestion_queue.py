@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
 
-from fastapi import Request
+import pytest
+from fastapi import HTTPException, Request
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,9 @@ from app.api.admin.ingestion import (
     _execute_document_ingestion_with_timeout,
     _run_document_ingestion_task_in_subprocess,
     claim_next_pending_document,
+    start_ingestion,
 )
+from app.api.schemas.ingestion import StartIngestionRequest
 from app.api.system import get_ingestion_worker_status
 from app.config.settings import Settings
 from app.modules.documents.application.commands import MarkDocumentFailedCommand
@@ -363,6 +366,94 @@ def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
         "settings": settings,
         "session_factory": factory,
     }
+
+
+def test_subprocess_reports_ingestion_failure(monkeypatch):
+    settings = SimpleNamespace(
+        database=SimpleNamespace(url="postgresql://test")
+    )
+    factory = SimpleNamespace(kw={"bind": None})
+    reported = []
+
+    class ResultQueue:
+        def put(self, result):
+            reported.append(result)
+
+    monkeypatch.setattr(
+        "app.config.settings.get_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.db.session.create_session_factory",
+        lambda database_url: factory,
+    )
+
+    def fail_ingestion(document_id, application):
+        _ = (document_id, application)
+        raise ValueError("parser failed")
+
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.run_document_ingestion_task",
+        fail_ingestion,
+    )
+
+    with pytest.raises(ValueError, match="parser failed"):
+        _run_document_ingestion_task_in_subprocess(
+            "test-doc-id",
+            cast(object, ResultQueue()),
+        )
+
+    assert reported == [("error", "parser failed")]
+
+
+def test_start_ingestion_locks_document_and_rejects_already_queued(monkeypatch):
+    document_id = uuid4()
+    row = SimpleNamespace(status="pending")
+
+    class StartSession:
+        def __init__(self):
+            self.closed = False
+            self.rolled_back = False
+            self.statement = ""
+
+        def execute(self, statement):
+            self.statement = str(statement.compile(dialect=postgresql.dialect()))
+            return _ClaimResult(row)
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            self.closed = True
+
+    session = StartSession()
+    document_service = SimpleNamespace(
+        get_by_id=lambda query: SimpleNamespace(status="pending"),
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                session_factory=lambda: cast(Session, session),
+                settings=SimpleNamespace(ingestion_stale_after_minutes=15),
+            )
+        )
+    )
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.get_document_application_service",
+        lambda request, session: document_service,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        start_ingestion(
+            StartIngestionRequest(document_id=str(document_id)),
+            cast(Request, request),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "document_ingestion_already_queued"
+    assert "FOR UPDATE" in session.statement
+    assert session.rolled_back
+    assert session.closed
 
 
 def test_worker_health_endpoint_reports_running_and_failed_workers():

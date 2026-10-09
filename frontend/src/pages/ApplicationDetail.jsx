@@ -517,7 +517,9 @@ export default function ApplicationDetail() {
       }
       if (queued > 0) {
         const details = [
-          alreadyProcessing ? `${alreadyProcessing} already processing` : null,
+          alreadyProcessing
+            ? `${alreadyProcessing} already queued or processing`
+            : null,
           failed ? `${failed} could not be queued` : null,
         ].filter(Boolean).join("; ");
         toast.success(`Vector rebuild queued for ${queued} document(s)!`, {
@@ -526,7 +528,9 @@ export default function ApplicationDetail() {
       } else if (alreadyProcessing > 0 || failed > 0) {
         toast.error("No documents were queued for rebuild.", {
           description: [
-            alreadyProcessing ? `${alreadyProcessing} already processing` : null,
+            alreadyProcessing
+              ? `${alreadyProcessing} already queued or processing`
+              : null,
             failed ? `${failed} failed to queue` : null,
           ].filter(Boolean).join("; "),
         });

@@ -559,21 +559,21 @@ def _execute_document_ingestion_with_timeout(
                 f"Document ingestion timed out after {timeout_seconds} seconds."
             )
 
-        if process.exitcode not in (0, None):
-            _mark_document_failed_and_log(
-                session_factory,
-                document_id,
-                f"Document ingestion process exited unexpectedly with code {process.exitcode}.",
-                application.state.settings,
-            )
-            raise RuntimeError(
-                "Document ingestion process exited unexpectedly with code "
-                f"{process.exitcode}."
-            )
-
         try:
             result_status, payload = queue.get(timeout=5)
         except queue_module.Empty as exc:
+            if process.exitcode not in (0, None):
+                reason = (
+                    "Document ingestion process exited unexpectedly with code "
+                    f"{process.exitcode}."
+                )
+                _mark_document_failed_and_log(
+                    session_factory,
+                    document_id,
+                    reason,
+                    application.state.settings,
+                )
+                raise RuntimeError(reason) from exc
             logger.exception(
                 "Document ingestion subprocess exited without reporting a result",
                 extra={"document_id": document_id},
@@ -582,7 +582,27 @@ def _execute_document_ingestion_with_timeout(
                 "Document ingestion subprocess exited without reporting a result."
             ) from exc
         if result_status == "error":
-            raise RuntimeError(payload or "document ingestion failed")
+            reason = payload or "document ingestion failed"
+            if process.exitcode not in (0, None):
+                _mark_document_failed_and_log(
+                    session_factory,
+                    document_id,
+                    reason,
+                    application.state.settings,
+                )
+            raise RuntimeError(reason)
+        if process.exitcode not in (0, None):
+            reason = (
+                "Document ingestion process exited unexpectedly with code "
+                f"{process.exitcode}."
+            )
+            _mark_document_failed_and_log(
+                session_factory,
+                document_id,
+                reason,
+                application.state.settings,
+            )
+            raise RuntimeError(reason)
         if result_status != "success":
             raise RuntimeError(
                 f"Document ingestion subprocess returned unknown status: {result_status}."
@@ -733,7 +753,7 @@ def run_document_ingestion_task(
                         extra={"document_id": document_id},
                     )
 
-        return
+        raise
 
     finally:
         if session is not None:
@@ -757,10 +777,35 @@ def start_ingestion(
     payload: StartIngestionRequest,
     request: Request,
 ) -> IngestionResponse:
+    try:
+        document_uuid = UUID(payload.document_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "document_id_invalid",
+                "message": "Document ID must be a valid UUID.",
+            },
+        ) from exc
+
     session_factory = _get_app_session_factory(request.app)
     session: Session = session_factory()
 
     try:
+        document_row = session.execute(
+            select(DocumentModel)
+            .where(DocumentModel.id == document_uuid)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if document_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "document_not_found",
+                    "message": "Document not found.",
+                },
+            )
+
         document_service = get_document_application_service(
             request=request,
             session=session,
@@ -770,7 +815,15 @@ def start_ingestion(
                 document_id=payload.document_id,
             )
         )
-        if document.status == "processing":
+        if document_row.status == "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "document_ingestion_already_queued",
+                    "message": "This document is already queued for ingestion.",
+                },
+            )
+        if document_row.status == "processing":
             last_updated = document.updated_at
             if last_updated.tzinfo is None:
                 last_updated = last_updated.replace(tzinfo=timezone.utc)
