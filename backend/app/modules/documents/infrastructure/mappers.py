@@ -19,6 +19,8 @@ def map_document_model_to_entity(model: DocumentModel) -> Document:
         checksum_sha256=model.checksum_sha256,
         status=model.status,
         failure_reason=model.failure_reason,
+        ingestion_version=model.ingestion_version,
+        ready_version=model.ready_version,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

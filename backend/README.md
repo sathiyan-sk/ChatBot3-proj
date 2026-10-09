@@ -107,6 +107,28 @@ and indexing. Jobs without a heartbeat for `INGESTION_STALE_AFTER_MINUTES`
 `/api/system/ingestion-workers` for worker health and Render logs for
 document-scoped ingestion stage progress.
 
+Uploaded source objects must live in a **private** Supabase Storage bucket
+(the default bucket name is `data_files`). The backend accesses it with the
+service-role key; do not expose source files through public object URLs. Each
+job increments `documents.ingestion_version`. Successful vector writes,
+`ready_version`, and the document's `ready` status publish in one PostgreSQL
+transaction. Each vector row carries that version, and retrieval only returns
+the version referenced by `ready_version`. Failed or superseded attempts do
+not replace the last published version, so a previously indexed version
+remains searchable while a retry is pending or fails. Apply migrations
+`0002_document_ingestion_versions` and `0003_version_document_chunks` before
+deploying this version of the backend. For databases managed with
+`supabase_schema_fix.sql`, apply that script as well; it switches the default
+`data_files` bucket to private. If `SUPABASE_BUCKET_NAME` is customized, make
+that bucket private in Supabase Storage settings.
+
+For OpenRouter embeddings, `OPENROUTER_EMBEDDING_BATCH_SIZE` controls how many
+chunks are sent per request (default `64`, maximum `64`). Lower it if the
+selected embedding model has stricter request limits. Vector writes are sent
+to PostgreSQL in batches of 100 chunks. Raising worker concurrency can reduce
+queue wait, but increases peak memory and provider/database load per service
+instance; start conservatively and monitor Render memory and provider limits.
+
 Embedded customer sites are configured separately in the application's
 `allowed_origins` field in the admin UI. Add the complete origin, for example
 `https://customer.example.com`, without a trailing slash or path. Do not add

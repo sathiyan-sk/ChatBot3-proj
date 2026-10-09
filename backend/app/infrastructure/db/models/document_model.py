@@ -38,6 +38,13 @@ class DocumentModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
     checksum_sha256: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", server_default="pending")
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ingestion_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    ready_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     application = relationship("ApplicationModel", back_populates="documents")
     knowledge_base = relationship("KnowledgeBaseModel", back_populates="documents")

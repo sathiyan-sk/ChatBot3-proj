@@ -107,6 +107,7 @@ class KnowledgeIngestionPipeline:
                 source_identifier=raw_source.source_identifier,
                 document_title=normalized_document.title,
                 document_metadata=normalized_document.metadata,
+                ingestion_version=request.ingestion_version,
             ),
         )
         embedded_chunks = _run_ingestion_stage(

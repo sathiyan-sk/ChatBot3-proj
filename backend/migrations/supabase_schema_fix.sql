@@ -162,6 +162,8 @@ CREATE TABLE IF NOT EXISTS public.documents (
     checksum_sha256 varchar(128),
     status varchar(50) NOT NULL DEFAULT 'pending',
     failure_reason text,
+    ingestion_version integer NOT NULL DEFAULT 0,
+    ready_version integer,
     created_at timestamptz NOT NULL DEFAULT NOW(),
     updated_at timestamptz NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_documents_application FOREIGN KEY (application_id) REFERENCES public.applications(id) ON DELETE CASCADE,
@@ -204,6 +206,8 @@ ALTER TABLE public.documents
     ADD COLUMN IF NOT EXISTS checksum_sha256 varchar(128),
     ADD COLUMN IF NOT EXISTS status varchar(50) DEFAULT 'pending',
     ADD COLUMN IF NOT EXISTS failure_reason text,
+    ADD COLUMN IF NOT EXISTS ingestion_version integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ready_version integer,
     ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT NOW();
 
@@ -525,20 +529,81 @@ ALTER TABLE public.widgets
 -- NOTE: the embedding dimension must match VECTOR_STORE_DIMENSION in the
 -- backend .env (1024 for qwen3-embedding-8b, 768 for nomic-embed-text).
 -- If you change the dimension, drop and recreate this table.
+-- The backend default source bucket is private; custom bucket names must also
+-- be configured as private in Supabase Storage.
+UPDATE storage.buckets
+SET public = false
+WHERE id = 'data_files';
+
 CREATE TABLE IF NOT EXISTS public.document_chunks (
-    chunk_id text PRIMARY KEY,
+    chunk_id text NOT NULL,
     knowledge_base_id text NOT NULL,
     document_id text NOT NULL,
     document_title text NOT NULL,
     content text NOT NULL,
     source_uri text,
     metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
-    embedding vector(1024) NOT NULL
+    embedding vector(1024) NOT NULL,
+    ingestion_version integer NOT NULL DEFAULT 1,
+    PRIMARY KEY (chunk_id, ingestion_version)
 );
 
+ALTER TABLE public.document_chunks
+    ADD COLUMN IF NOT EXISTS ingestion_version integer NOT NULL DEFAULT 1;
+
+DO $$
+DECLARE
+    primary_key_name text;
+    primary_key_columns text[];
+BEGIN
+    SELECT constraint_row.conname,
+           array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+    INTO primary_key_name, primary_key_columns
+    FROM pg_constraint AS constraint_row
+    JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY
+        AS key_column(attnum, ordinality) ON true
+    JOIN pg_attribute AS attribute_row
+        ON attribute_row.attrelid = constraint_row.conrelid
+       AND attribute_row.attnum = key_column.attnum
+    WHERE constraint_row.conrelid = 'public.document_chunks'::regclass
+      AND constraint_row.contype = 'p'
+    GROUP BY constraint_row.conname;
+
+    IF primary_key_name IS NOT NULL
+       AND primary_key_columns <> ARRAY['chunk_id', 'ingestion_version'] THEN
+        EXECUTE format(
+            'ALTER TABLE public.document_chunks DROP CONSTRAINT %I',
+            primary_key_name
+        );
+        primary_key_name := NULL;
+    END IF;
+
+    IF primary_key_name IS NULL THEN
+        ALTER TABLE public.document_chunks
+            ADD CONSTRAINT pk_document_chunks
+            PRIMARY KEY (chunk_id, ingestion_version);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS document_chunks_kb_idx ON public.document_chunks (knowledge_base_id);
+CREATE INDEX IF NOT EXISTS document_chunks_document_version_idx ON public.document_chunks (document_id, ingestion_version);
 CREATE INDEX IF NOT EXISTS document_chunks_content_fts_idx ON public.document_chunks USING gin (to_tsvector('english', content));
 CREATE INDEX IF NOT EXISTS document_chunks_embedding_idx ON public.document_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- Preserve the last published vector set as version 1 for existing documents.
+UPDATE public.documents AS document
+SET ingestion_version = 1,
+    ready_version = 1
+WHERE document.ingestion_version = 0
+  AND document.ready_version IS NULL
+  AND (
+      document.status = 'ready'
+      OR EXISTS (
+          SELECT 1
+          FROM public.document_chunks AS chunk
+          WHERE chunk.document_id = document.id::text
+      )
+  );
 
 -- Final schema note:
 -- The application layer stores allowed_origins as a list/array on Postgres, not as a comma-delimited string.

@@ -72,6 +72,7 @@ class KnowledgeIngestionPipelineRequest:
     source_path: str
     source_identifier: str
     metadata: dict[str, str] = field(default_factory=dict)
+    ingestion_version: int = 1
 
 
 @dataclass(slots=True, frozen=True)

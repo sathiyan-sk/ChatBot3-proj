@@ -21,3 +21,5 @@ class DocumentDto:
     failure_reason: str | None
     created_at: datetime
     updated_at: datetime
+    ingestion_version: int = 0
+    ready_version: int | None = None

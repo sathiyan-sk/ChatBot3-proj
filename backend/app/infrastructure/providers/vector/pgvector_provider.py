@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import Settings
 from app.core.exceptions import ApplicationError
 from app.knowledge_engine.contracts.vector_store import VectorStoreContract
-from app.knowledge_engine.shared.models import RetrievedChunk
+from app.knowledge_engine.shared.models import EmbeddedChunk, RetrievedChunk
 
 
 @dataclass(slots=True)
@@ -25,21 +25,22 @@ class PgVectorProvider(VectorStoreContract):
         embedding: list[float],
         metadata: dict[str, str],
     ) -> None:
-        knowledge_base_id = metadata.get("knowledge_base_id")
-        document_id = metadata.get("document_id")
-        document_title = metadata.get("document_title")
+        self.index_chunks(
+            [
+                EmbeddedChunk(
+                    chunk_id=chunk_id,
+                    content=content,
+                    embedding=embedding,
+                    metadata=metadata,
+                )
+            ]
+        )
 
-        if not knowledge_base_id or not document_id or not document_title:
-            raise ApplicationError(
-                message="Indexed chunk metadata is incomplete.",
-                code="vector_index_metadata_invalid",
-                status_code=422,
-            )
+    def index_chunks(self, chunks: list[EmbeddedChunk]) -> None:
+        if not chunks:
+            return
 
-        source_uri = metadata.get("source_identifier")
-        embedding_literal = self._to_pgvector_literal(embedding)
         table_name = self.settings.vector_store_table_name
-
         statement = text(
             f"""
             insert into {table_name} (
@@ -50,7 +51,8 @@ class PgVectorProvider(VectorStoreContract):
                 content,
                 source_uri,
                 metadata_json,
-                embedding
+                embedding,
+                ingestion_version
             )
             values (
                 :chunk_id,
@@ -60,9 +62,10 @@ class PgVectorProvider(VectorStoreContract):
                 :content,
                 :source_uri,
                 cast(:metadata_json as jsonb),
-                cast(:embedding as vector)
+                cast(:embedding as vector),
+                :ingestion_version
             )
-            on conflict (chunk_id)
+            on conflict (chunk_id, ingestion_version)
             do update set
                 knowledge_base_id = excluded.knowledge_base_id,
                 document_id = excluded.document_id,
@@ -74,18 +77,41 @@ class PgVectorProvider(VectorStoreContract):
             """
         )
 
+        parameters = []
+        for chunk in chunks:
+            metadata = chunk.metadata
+            knowledge_base_id = metadata.get("knowledge_base_id")
+            document_id = metadata.get("document_id")
+            document_title = metadata.get("document_title")
+            if not knowledge_base_id or not document_id or not document_title:
+                raise ApplicationError(
+                    message="Indexed chunk metadata is incomplete.",
+                    code="vector_index_metadata_invalid",
+                    status_code=422,
+                )
+            parameters.append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "knowledge_base_id": str(knowledge_base_id),
+                    "document_id": str(document_id),
+                    "document_title": document_title,
+                    "content": chunk.content,
+                    "source_uri": metadata.get("source_identifier"),
+                    "metadata_json": self._to_json(metadata),
+                    "embedding": self._to_pgvector_literal(chunk.embedding),
+                    "ingestion_version": int(metadata.get("ingestion_version", "0")),
+                }
+            )
+            if parameters[-1]["ingestion_version"] < 1:
+                raise ApplicationError(
+                    message="Indexed chunk version is missing or invalid.",
+                    code="vector_index_version_invalid",
+                    status_code=422,
+                )
+
         self.session.execute(
             statement,
-            {
-                "chunk_id": chunk_id,
-                "knowledge_base_id": str(knowledge_base_id) if not isinstance(knowledge_base_id, str) else knowledge_base_id,
-                "document_id": str(document_id) if not isinstance(document_id, str) else document_id,
-                "document_title": document_title,
-                "content": content,
-                "source_uri": source_uri,
-                "metadata_json": self._to_json(metadata),
-                "embedding": embedding_literal,
-            },
+            parameters,
         )
 
     def similarity_search(
@@ -100,16 +126,20 @@ class PgVectorProvider(VectorStoreContract):
         statement = text(
             f"""
             select
-                chunk_id,
-                document_id,
-                document_title,
-                content,
-                source_uri,
-                metadata_json,
-                1 - (embedding <=> cast(:query_embedding as vector)) as score
-            from {table_name}
-            where knowledge_base_id = cast(:knowledge_base_id as text)
-            order by embedding <=> cast(:query_embedding as vector)
+                chunks.chunk_id,
+                chunks.document_id,
+                chunks.document_title,
+                chunks.content,
+                chunks.source_uri,
+                chunks.metadata_json,
+                1 - (chunks.embedding <=> cast(:query_embedding as vector)) as score
+            from {table_name} AS chunks
+            join documents AS document
+              on document.id::text = chunks.document_id
+             and document.knowledge_base_id::text = chunks.knowledge_base_id
+             and document.ready_version = chunks.ingestion_version
+            where chunks.knowledge_base_id = cast(:knowledge_base_id as text)
+            order by chunks.embedding <=> cast(:query_embedding as vector)
             limit :top_k
             """
         )
@@ -139,19 +169,23 @@ class PgVectorProvider(VectorStoreContract):
         statement = text(
             f"""
             select
-                chunk_id,
-                document_id,
-                document_title,
-                content,
-                source_uri,
-                metadata_json,
+                chunks.chunk_id,
+                chunks.document_id,
+                chunks.document_title,
+                chunks.content,
+                chunks.source_uri,
+                chunks.metadata_json,
                 ts_rank_cd(
-                to_tsvector('english', content),
+                to_tsvector('english', chunks.content),
                 plainto_tsquery('english', :query_text)
                 ) as score
-            from {table_name}
-            where knowledge_base_id = cast(:knowledge_base_id as text)
-              and to_tsvector('english', content) @@ plainto_tsquery('english', :query_text)
+            from {table_name} AS chunks
+            join documents AS document
+              on document.id::text = chunks.document_id
+             and document.knowledge_base_id::text = chunks.knowledge_base_id
+             and document.ready_version = chunks.ingestion_version
+            where chunks.knowledge_base_id = cast(:knowledge_base_id as text)
+              and to_tsvector('english', chunks.content) @@ plainto_tsquery('english', :query_text)
             order by score desc
             limit :top_k
             """
@@ -201,6 +235,7 @@ class PgVectorProvider(VectorStoreContract):
         self,
         *,
         document_id: str,
+        ingestion_version: int,
         keep_chunk_ids: list[str],
     ) -> int:
         """Remove obsolete chunks after replacement chunks are indexed."""
@@ -209,6 +244,7 @@ class PgVectorProvider(VectorStoreContract):
             f"""
             delete from {table_name}
             where document_id = cast(:document_id as text)
+              and ingestion_version = :ingestion_version
               and chunk_id not in :keep_chunk_ids
             """
         ).bindparams(bindparam("keep_chunk_ids", expanding=True))
@@ -216,7 +252,30 @@ class PgVectorProvider(VectorStoreContract):
             statement,
             {
                 "document_id": str(document_id),
+                "ingestion_version": ingestion_version,
                 "keep_chunk_ids": keep_chunk_ids,
+            },
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def delete_obsolete_document_versions(
+        self,
+        *,
+        document_id: str,
+        keep_version: int,
+    ) -> int:
+        table_name = self.settings.vector_store_table_name
+        result = self.session.execute(
+            text(
+                f"""
+                delete from {table_name}
+                where document_id = cast(:document_id as text)
+                  and ingestion_version <> :keep_version
+                """
+            ),
+            {
+                "document_id": str(document_id),
+                "keep_version": keep_version,
             },
         )
         return int(getattr(result, "rowcount", 0) or 0)

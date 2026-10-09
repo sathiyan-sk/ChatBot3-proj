@@ -20,7 +20,10 @@ from app.api.admin.ingestion import (
 from app.api.schemas.ingestion import StartIngestionRequest
 from app.api.system import get_ingestion_worker_status
 from app.config.settings import Settings
-from app.modules.documents.application.commands import MarkDocumentFailedCommand
+from app.modules.documents.application.commands import (
+    MarkDocumentFailedCommand,
+    MarkDocumentReadyCommand,
+)
 from app.modules.documents.application.services import DocumentApplicationService
 from app.modules.documents.domain.entities import Document
 from app.modules.documents.domain.repository_interfaces import (
@@ -88,20 +91,22 @@ def test_claim_marks_pending_document_processing_with_skip_locked():
     document = SimpleNamespace(
         id=uuid4(),
         status="pending",
+        ingestion_version=0,
         failure_reason="previous failure",
         updated_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
     )
     session = _ClaimSession(document)
 
-    document_id = claim_next_pending_document(lambda: session)
+    claimed_job = claim_next_pending_document(lambda: session)
 
-    assert document_id == str(document.id)
+    assert claimed_job == (str(document.id), 1)
     assert session.skip_locked
     assert "FOR UPDATE SKIP LOCKED" in session.sql
     assert "documents.status" in session.sql
     assert session.committed
     assert session.closed
     assert document.status == "processing"
+    assert document.ingestion_version == 1
     assert document.failure_reason is None
     assert document.updated_at > datetime(2025, 1, 1, tzinfo=timezone.utc)
 
@@ -118,21 +123,23 @@ def test_claim_reclaims_expired_processing_document():
     document = SimpleNamespace(
         id=uuid4(),
         status="processing",
+        ingestion_version=1,
         failure_reason=None,
         updated_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
     )
     session = _ClaimSession(document)
 
-    document_id = claim_next_pending_document(
+    claimed_job = claim_next_pending_document(
         lambda: session,
         stale_after_minutes=15,
     )
 
-    assert document_id == str(document.id)
+    assert claimed_job == (str(document.id), 2)
     assert session.skip_locked
     assert session.committed
     assert session.closed
     assert document.status == "processing"
+    assert document.ingestion_version == 2
     assert document.updated_at > datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
@@ -196,6 +203,7 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
             "test-doc-id",
             app,
             timeout_seconds=5,
+            ingestion_version=1,
         )
     except TimeoutError:
         pass
@@ -204,7 +212,7 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
     assert fake_process.terminated is True
     assert calls["failed"][0] == "test-doc-id"
     assert "timed out" in calls["failed"][1].lower()
-    assert calls["failed"][2] is app.state.settings
+    assert calls["failed"][2] == 1
 
 
 def test_duplicate_execution_skips_subprocess_when_advisory_lock_is_held(
@@ -232,43 +240,41 @@ def test_duplicate_execution_skips_subprocess_when_advisory_lock_is_held(
         "test-doc-id",
         app,
         timeout_seconds=5,
+        ingestion_version=1,
     )
 
     assert lock_session.closed
 
 
-def test_timeout_failure_marker_provides_application_settings(monkeypatch):
-    settings = cast(Settings, SimpleNamespace(storage=object()))
+def test_timeout_failure_marker_is_scoped_to_ingestion_version(monkeypatch):
     observed = {}
 
     class FakeSession:
+        def execute(self, statement, parameters=None):
+            _ = parameters
+            observed["statement"] = statement
+            return SimpleNamespace(rowcount=1)
+
         def commit(self):
             observed["committed"] = True
 
+        def rollback(self):
+            observed["rolled_back"] = True
+
         def close(self):
             observed["closed"] = True
-
-    class FakeService:
-        def mark_failed(self, command):
-            observed["command"] = command
-
-    monkeypatch.setattr(
-        "app.api.admin.ingestion.build_document_application_service",
-        lambda settings, session: (
-            observed.update(settings=settings, session=session) or FakeService()
-        ),
-    )
 
     from app.api.admin.ingestion import _mark_document_failed_and_log
 
     _mark_document_failed_and_log(
         lambda: cast(Session, FakeSession()),
-        "test-doc-id",
+        str(uuid4()),
         "timeout",
-        settings,
+        7,
     )
 
-    assert observed["settings"] is settings
+    assert observed["statement"] is not None
+    assert "documents.ingestion_version" in str(observed["statement"])
     assert observed["committed"] is True
     assert observed["closed"] is True
 
@@ -292,6 +298,8 @@ def test_marking_failed_document_failed_again_is_idempotent():
         failure_reason="First timeout",
         created_at=now,
         updated_at=now,
+        ingestion_version=1,
+        ready_version=None,
     )
 
     class FakeDocumentRepository:
@@ -330,6 +338,53 @@ def test_marking_failed_document_failed_again_is_idempotent():
     assert result.failure_reason == "Second timeout"
 
 
+def test_document_without_published_version_cannot_be_marked_ready():
+    document_id = uuid4()
+    now = datetime.now(timezone.utc)
+    existing_document = Document(
+        id=document_id,
+        application_id=uuid4(),
+        knowledge_base_id=uuid4(),
+        title="Not yet indexed",
+        description=None,
+        source_type="file",
+        source_uri=None,
+        storage_path="test.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=1,
+        checksum_sha256=None,
+        status="processing",
+        failure_reason=None,
+        created_at=now,
+        updated_at=now,
+        ingestion_version=1,
+        ready_version=None,
+    )
+
+    class FakeDocumentRepository:
+        def get_by_id(self, requested_id):
+            assert requested_id == str(document_id)
+            return existing_document
+
+    service = DocumentApplicationService(
+        document_repository=cast(
+            DocumentRepositoryInterface,
+            FakeDocumentRepository(),
+        ),
+        knowledge_base_repository=cast(
+            KnowledgeBaseRepositoryInterface,
+            object(),
+        ),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.mark_ready(
+            MarkDocumentReadyCommand(document_id=str(document_id))
+        )
+
+    assert getattr(exc_info.value, "code", None) == "document_version_not_ready"
+
+
 def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
     settings = SimpleNamespace(
         database=SimpleNamespace(url="postgresql://test")
@@ -352,19 +407,24 @@ def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
     )
     monkeypatch.setattr(
         "app.api.admin.ingestion.run_document_ingestion_task",
-        lambda document_id, application: observed.update(
+        lambda document_id, application, *, ingestion_version: observed.update(
             document_id=document_id,
             settings=application.state.settings,
             session_factory=application.state.session_factory,
+            ingestion_version=ingestion_version,
         ),
     )
 
-    _run_document_ingestion_task_in_subprocess("test-doc-id")
+    _run_document_ingestion_task_in_subprocess(
+        "test-doc-id",
+        ingestion_version=3,
+    )
 
     assert observed == {
         "document_id": "test-doc-id",
         "settings": settings,
         "session_factory": factory,
+        "ingestion_version": 3,
     }
 
 
@@ -388,8 +448,8 @@ def test_subprocess_reports_ingestion_failure(monkeypatch):
         lambda database_url: factory,
     )
 
-    def fail_ingestion(document_id, application):
-        _ = (document_id, application)
+    def fail_ingestion(document_id, application, *, ingestion_version=None):
+        _ = (document_id, application, ingestion_version)
         raise ValueError("parser failed")
 
     monkeypatch.setattr(

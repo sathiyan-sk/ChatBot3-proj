@@ -59,6 +59,38 @@ def test_openrouter_batches_inputs_and_restores_response_order(monkeypatch):
     assert vectors == [[0.0, 1.0], [1.0, 2.0], [0.0, 1.0]]
 
 
+def test_openrouter_uses_configured_batch_size_for_large_documents(monkeypatch):
+    batches = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": [
+                    {"index": index, "embedding": [1.0, 2.0]}
+                    for index in range(len(batches[-1]))
+                ]
+            }
+
+    def fake_post(_url, *, json, headers, timeout):
+        batches.append(json["input"])
+        return Response()
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.embeddings.openrouter_embeddings_provider.httpx.post",
+        fake_post,
+    )
+
+    provider = _provider()
+    provider.settings.embedding_batch_size = 64
+    vectors = provider.embed_documents([f"text-{index}" for index in range(129)])
+
+    assert [len(batch) for batch in batches] == [64, 64, 1]
+    assert len(vectors) == 129
+
+
 def test_openrouter_retries_transient_read_timeout(monkeypatch):
     attempts = 0
 

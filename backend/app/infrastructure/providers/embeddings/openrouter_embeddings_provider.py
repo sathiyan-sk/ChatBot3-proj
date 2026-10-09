@@ -23,7 +23,7 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
         self,
         texts: list[str],
         *,
-        batch_size: int = 16,
+        batch_size: int | None = None,
     ) -> list[list[float]]:
         if not texts:
             return []
@@ -80,7 +80,12 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
         }
 
         embeddings: list[list[float]] = []
-        effective_batch_size = max(1, batch_size)
+        configured_batch_size = (
+            batch_size
+            if batch_size is not None
+            else getattr(self.settings, "embedding_batch_size", 64)
+        )
+        effective_batch_size = min(64, max(1, int(configured_batch_size)))
         for offset in range(0, len(normalized_texts), effective_batch_size):
             batch = normalized_texts[offset : offset + effective_batch_size]
             payload = {
@@ -89,6 +94,7 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
                 "dimensions": dimensions,
             }
 
+            batch_started_at = time.monotonic()
             response = self._post_with_retries(
                 url=url,
                 payload=payload,
@@ -124,6 +130,18 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
                 )
 
             embeddings.extend(batch_embeddings)
+            logger.info(
+                "Generated OpenRouter embedding batch",
+                extra={
+                    "batch_size": len(batch),
+                    "completed_inputs": len(embeddings),
+                    "total_inputs": len(normalized_texts),
+                    "duration_seconds": round(
+                        time.monotonic() - batch_started_at,
+                        3,
+                    ),
+                },
+            )
 
         return embeddings
 

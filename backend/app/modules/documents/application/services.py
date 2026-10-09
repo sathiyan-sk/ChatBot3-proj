@@ -235,6 +235,13 @@ class DocumentApplicationService:
                 status_code=404,
             )
 
+        if command.status == "ready" and document.ready_version is None:
+            raise ApplicationError(
+                message="A document can only be marked ready after an ingestion version is published.",
+                code="document_version_not_ready",
+                status_code=409,
+            )
+
         updated = self.document_repository.update(
             document_id=str(document.id),
             title=DocumentTitle(
@@ -354,6 +361,13 @@ class DocumentApplicationService:
                 status_code=404,
             )
 
+        if status == "ready" and document.ready_version is None:
+            raise ApplicationError(
+                message="A document can only be marked ready after an ingestion version is published.",
+                code="document_version_not_ready",
+                status_code=409,
+            )
+
         allowed=self._ALLOWED_TRANSITIONS.get(document.status, set())
 
         if status not in allowed:
@@ -432,6 +446,8 @@ class DocumentApplicationService:
             checksum_sha256=document.checksum_sha256,
             status=document.status,
             failure_reason=document.failure_reason,
+            ingestion_version=document.ingestion_version,
+            ready_version=document.ready_version,
             created_at=document.created_at,
             updated_at=document.updated_at,
         )

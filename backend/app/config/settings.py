@@ -50,6 +50,7 @@ class OpenRouterSettings:
     embedding_model: str
     embedding_dimensions: int
     fallback_models: tuple[str, ...] = ()
+    embedding_batch_size: int = 64
 
 @dataclass(slots=True, frozen=True)
 class ProviderSettings:
@@ -261,6 +262,10 @@ def load_settings() -> Settings:
                     "OPENROUTER_EMBEDDING_DIMENSIONS",
                     "1024",
                 )
+            ),
+            embedding_batch_size=min(
+                64,
+                max(1, int(os.getenv("OPENROUTER_EMBEDDING_BATCH_SIZE", "64"))),
             ),
             fallback_models=tuple(
                 item.strip()

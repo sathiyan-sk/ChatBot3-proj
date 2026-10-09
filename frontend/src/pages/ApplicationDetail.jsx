@@ -1139,6 +1139,11 @@ export default function ApplicationDetail() {
                                         {doc.failure_reason}
                                       </p>
                                     )}
+                                    {doc.status === "failed" && doc.ready_version != null && (
+                                      <p className="mt-1 text-[10px] text-emerald-300">
+                                        Serving last published version {doc.ready_version}
+                                      </p>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4">
                                     <div className="flex items-center justify-end gap-1.5">

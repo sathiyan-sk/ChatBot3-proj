@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from pathlib import PurePath
 from uuid import UUID
 
@@ -55,6 +57,7 @@ router = APIRouter(
         Depends(require_admin),
     ],
 )
+logger = logging.getLogger(__name__)
 
 SUPPORTED_UPLOAD_EXTENSIONS = frozenset(
     {".pdf", ".docx", ".txt", ".csv", ".json", ".md"}
@@ -75,6 +78,7 @@ def upload_document(
         get_document_application_service,
     ),
 ) -> DocumentResponse:
+    upload_started_at = time.monotonic()
     filename = file.filename or ""
     extension = PurePath(filename).suffix.lower()
     if extension not in SUPPORTED_UPLOAD_EXTENSIONS:
@@ -107,6 +111,17 @@ def upload_document(
         filename=filename,
         content_type=file.content_type,
         content=content,
+    )
+    logger.info(
+        "Document upload stored and queued",
+        extra={
+            "document_id": result.id,
+            "file_size_bytes": len(content),
+            "upload_duration_seconds": round(
+                time.monotonic() - upload_started_at,
+                3,
+            ),
+        },
     )
 
     return DocumentResponse.model_validate(

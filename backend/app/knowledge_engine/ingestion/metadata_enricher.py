@@ -15,6 +15,7 @@ class MetadataEnricher:
         source_identifier: str,
         document_title: str,
         document_metadata: dict[str, str],
+        ingestion_version: int,
     ) -> list[DocumentChunk]:
         enriched_chunks: list[DocumentChunk] = []
 
@@ -32,6 +33,7 @@ class MetadataEnricher:
                             "source_type": source_type,
                             "source_identifier": source_identifier,
                             "document_title": document_title,
+                            "ingestion_version": str(ingestion_version),
                         },
                     ),
                 )

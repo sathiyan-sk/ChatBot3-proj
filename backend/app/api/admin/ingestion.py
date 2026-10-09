@@ -38,7 +38,6 @@ from app.knowledge_engine.shared.models import (
 from app.modules.documents.application.commands import (
     MarkDocumentFailedCommand,
     MarkDocumentProcessingCommand,
-    MarkDocumentReadyCommand,
 )
 from app.modules.documents.application.queries import (
     GetDocumentByIdQuery,
@@ -192,6 +191,7 @@ def _build_pipeline_request(
     document: object,
     source_path: str,
     source_type: str,
+    ingestion_version: int,
 ) -> KnowledgeIngestionPipelineRequest:
     return KnowledgeIngestionPipelineRequest(
         document_id=str(getattr(document, "id", "")),
@@ -199,6 +199,7 @@ def _build_pipeline_request(
         source_type=source_type,
         source_path=source_path,
         source_identifier=source_path,
+        ingestion_version=ingestion_version,
     )
 
 
@@ -276,7 +277,7 @@ def claim_next_pending_document(
     stale_after_minutes: int = 120,
     *,
     worker_id: int | None = None,
-) -> str | None:
+) -> tuple[str, int] | None:
     session: Session = session_factory()
     try:
         now = datetime.now(timezone.utc)
@@ -300,22 +301,33 @@ def claim_next_pending_document(
             return None
 
         was_stale = document.status == "processing"
+        queued_at = document.updated_at
+        document.ingestion_version += 1
         document.status = "processing"
         document.failure_reason = None
-        document.updated_at = datetime.now(timezone.utc)
+        claimed_at = datetime.now(timezone.utc)
+        document.updated_at = claimed_at
         document_id = str(document.id)
+        ingestion_version = document.ingestion_version
         session.commit()
+        if queued_at.tzinfo is None:
+            queued_at = queued_at.replace(tzinfo=timezone.utc)
         logger.info(
             "Claimed document ingestion job",
             extra={
                 "document_id": document_id,
+                "ingestion_version": ingestion_version,
                 "reclaimed_stale_job": was_stale,
+                "queue_wait_seconds": max(
+                    0,
+                    int((claimed_at - queued_at).total_seconds()),
+                ),
                 "worker_id": worker_id,
                 "worker_host": socket.gethostname(),
                 "worker_process_id": os.getpid(),
             },
         )
-        return document_id
+        return document_id, ingestion_version
     except Exception:
         session.rollback()
         raise
@@ -335,15 +347,16 @@ async def run_document_ingestion_worker(
     logger.info("Document ingestion worker started", extra={"worker_id": worker_id})
     while True:
         try:
-            document_id = await asyncio.to_thread(
+            claimed_job = await asyncio.to_thread(
                 claim_next_pending_document,
                 session_factory,
                 stale_after_minutes,
                 worker_id=worker_id,
             )
-            if document_id is None:
+            if claimed_job is None:
                 await asyncio.sleep(poll_interval_seconds)
                 continue
+            document_id, ingestion_version = claimed_job
 
             timeout_value = (
                 ingestion_timeout_seconds
@@ -357,6 +370,7 @@ async def run_document_ingestion_worker(
                     document_id,
                     application,
                     timeout_seconds=timeout_value,
+                    ingestion_version=ingestion_version,
                 )
             )
             while not task.done():
@@ -371,6 +385,7 @@ async def run_document_ingestion_worker(
                             touch_document_ingestion_heartbeat,
                             session_factory,
                             document_id,
+                            ingestion_version,
                         )
                     except Exception:
                         logger.exception(
@@ -395,6 +410,7 @@ async def run_document_ingestion_worker(
 def touch_document_ingestion_heartbeat(
     session_factory,
     document_id: str,
+    ingestion_version: int,
 ) -> None:
     session: Session = session_factory()
     try:
@@ -403,6 +419,7 @@ def touch_document_ingestion_heartbeat(
             .where(
                 DocumentModel.id == UUID(document_id),
                 DocumentModel.status == "processing",
+                DocumentModel.ingestion_version == ingestion_version,
             )
             .values(updated_at=datetime.now(timezone.utc))
         )
@@ -418,27 +435,41 @@ def _mark_document_failed_and_log(
     session_factory: Callable[[], Session],
     document_id: str,
     reason: str,
-    settings: Settings,
+    ingestion_version: int,
 ) -> None:
     session: Session | None = None
     try:
         active_session = session_factory()
         session = active_session
-        service = build_document_application_service(
-            settings=settings,
-            session=active_session,
-        )
-        service.mark_failed(
-            MarkDocumentFailedCommand(
-                document_id=document_id,
+        result = active_session.execute(
+            update(DocumentModel)
+            .where(
+                DocumentModel.id == UUID(document_id),
+                DocumentModel.ingestion_version == ingestion_version,
+                DocumentModel.status == "processing",
+            )
+            .values(
+                status="failed",
                 failure_reason=reason,
+                updated_at=datetime.now(timezone.utc),
             )
         )
+        if result.rowcount != 1:
+            active_session.rollback()
+            logger.warning(
+                "Skipped failure update for superseded document ingestion version",
+                extra={
+                    "document_id": document_id,
+                    "ingestion_version": ingestion_version,
+                },
+            )
+            return
         active_session.commit()
         logger.error(
             "Document ingestion failed and was marked failed",
             extra={
                 "document_id": document_id,
+                "ingestion_version": ingestion_version,
                 "failure_reason": reason,
             },
         )
@@ -457,6 +488,7 @@ def _mark_document_failed_and_log(
 def _run_document_ingestion_task_in_subprocess(
     document_id: str,
     queue: IngestionResultQueue | None = None,
+    ingestion_version: int | None = None,
 ) -> None:
     session_factory = None
     try:
@@ -478,7 +510,11 @@ def _run_document_ingestion_task_in_subprocess(
                 session_factory=session_factory,
             )
         )
-        run_document_ingestion_task(document_id, application)
+        run_document_ingestion_task(
+            document_id,
+            application,
+            ingestion_version=ingestion_version,
+        )
         if queue is not None:
             queue.put(("success", None))
     except Exception as exc:
@@ -497,6 +533,7 @@ def _execute_document_ingestion_with_timeout(
     application: IngestionApplication,
     *,
     timeout_seconds: int,
+    ingestion_version: int,
 ) -> None:
     if timeout_seconds <= 0:
         timeout_seconds = 300
@@ -534,7 +571,7 @@ def _execute_document_ingestion_with_timeout(
         queue = queue_factory()
         process = context.Process(
             target=_run_document_ingestion_task_in_subprocess,
-            args=(document_id, queue),
+            args=(document_id, queue, ingestion_version),
         )
         process.start()
         process.join(timeout=timeout_seconds)
@@ -553,7 +590,7 @@ def _execute_document_ingestion_with_timeout(
                 session_factory,
                 document_id,
                 f"Document ingestion timed out after {timeout_seconds} seconds.",
-                application.state.settings,
+                ingestion_version,
             )
             raise TimeoutError(
                 f"Document ingestion timed out after {timeout_seconds} seconds."
@@ -571,7 +608,7 @@ def _execute_document_ingestion_with_timeout(
                     session_factory,
                     document_id,
                     reason,
-                    application.state.settings,
+                    ingestion_version,
                 )
                 raise RuntimeError(reason) from exc
             logger.exception(
@@ -588,7 +625,7 @@ def _execute_document_ingestion_with_timeout(
                     session_factory,
                     document_id,
                     reason,
-                    application.state.settings,
+                    ingestion_version,
                 )
             raise RuntimeError(reason)
         if process.exitcode not in (0, None):
@@ -600,7 +637,7 @@ def _execute_document_ingestion_with_timeout(
                 session_factory,
                 document_id,
                 reason,
-                application.state.settings,
+                ingestion_version,
             )
             raise RuntimeError(reason)
         if result_status != "success":
@@ -614,6 +651,8 @@ def _execute_document_ingestion_with_timeout(
 def run_document_ingestion_task(
     document_id: str,
     application: IngestionApplication | None = None,
+    *,
+    ingestion_version: int | None = None,
 ) -> None:
     if application is None:
         from app.main import app
@@ -641,6 +680,17 @@ def run_document_ingestion_task(
                 document_id=document_id,
             )
         )
+        if (
+            ingestion_version is not None
+            and document.ingestion_version != ingestion_version
+        ):
+            raise RuntimeError(
+                "Document ingestion attempt was superseded before processing."
+            )
+        if ingestion_version is None:
+            raise RuntimeError(
+                "Document ingestion version is required to process this attempt."
+            )
 
         document_service.mark_processing(
             MarkDocumentProcessingCommand(
@@ -679,6 +729,7 @@ def run_document_ingestion_task(
             document=document,
             source_path=source_identifier,
             source_type=source_type,
+            ingestion_version=ingestion_version,
         )
 
         logger.info(
@@ -692,10 +743,36 @@ def run_document_ingestion_task(
 
         ingestion_pipeline.run(pipeline_request)
 
-        document_service.mark_ready(
-            MarkDocumentReadyCommand(
-                document_id=document_id,
+        published = active_session.execute(
+            update(DocumentModel)
+            .where(
+                DocumentModel.id == UUID(document_id),
+                DocumentModel.status == "processing",
+                DocumentModel.ingestion_version == ingestion_version,
             )
+            .values(
+                status="ready",
+                ready_version=ingestion_version,
+                failure_reason=None,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        if published.rowcount != 1:
+            raise RuntimeError(
+                "Document ingestion attempt was superseded before publication."
+            )
+        delete_obsolete_versions = getattr(
+            ingestion_pipeline.vector_indexer.vector_store_contract,
+            "delete_obsolete_document_versions",
+            None,
+        )
+        if not callable(delete_obsolete_versions):
+            raise RuntimeError(
+                "Vector store cannot safely retire obsolete document versions."
+            )
+        delete_obsolete_versions(
+            document_id=document_id,
+            keep_version=ingestion_version,
         )
         active_session.commit()
 
@@ -703,6 +780,7 @@ def run_document_ingestion_task(
             "Background document ingestion completed",
             extra={
                 "document_id": document_id,
+                "ingestion_version": ingestion_version,
                 "source_type": source_type,
             },
         )
@@ -723,17 +801,43 @@ def run_document_ingestion_task(
                 session_factory = _get_app_session_factory(application)
             active_failure_session = session_factory()
             failure_session = active_failure_session
-            failed_document_service = build_document_application_service(
-                settings=application.state.settings,
-                session=active_failure_session,
-            )
-            failed_document_service.mark_failed(
-                MarkDocumentFailedCommand(
-                    document_id=document_id,
-                    failure_reason=str(exc),
+            if ingestion_version is not None:
+                failure_result = active_failure_session.execute(
+                    update(DocumentModel)
+                    .where(
+                        DocumentModel.id == UUID(document_id),
+                        DocumentModel.ingestion_version == ingestion_version,
+                        DocumentModel.status == "processing",
+                    )
+                    .values(
+                        status="failed",
+                        failure_reason=str(exc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
                 )
-            )
-            active_failure_session.commit()
+                if failure_result.rowcount:
+                    active_failure_session.commit()
+                else:
+                    active_failure_session.rollback()
+                    logger.warning(
+                        "Skipped failure update for superseded document ingestion version",
+                        extra={
+                            "document_id": document_id,
+                            "ingestion_version": ingestion_version,
+                        },
+                    )
+            else:
+                failed_document_service = build_document_application_service(
+                    settings=application.state.settings,
+                    session=active_failure_session,
+                )
+                failed_document_service.mark_failed(
+                    MarkDocumentFailedCommand(
+                        document_id=document_id,
+                        failure_reason=str(exc),
+                    )
+                )
+                active_failure_session.commit()
         except Exception:
             if failure_session is not None:
                 _safe_rollback(failure_session)
