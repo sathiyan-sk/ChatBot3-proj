@@ -44,7 +44,7 @@ class DocumentApplicationService:
         "pending": {"pending", "processing", "failed", "archived"},
         "processing": {"pending", "processing", "ready", "failed", "archived"},
         "ready": {"pending", "archived", "processing"},
-        "failed": {"pending", "processing", "archived"},
+        "failed": {"pending", "processing", "failed", "archived"},
         "archived": set(),
     }
     def create(
@@ -236,7 +236,7 @@ class DocumentApplicationService:
             )
 
         updated = self.document_repository.update(
-            document_id=document.id,
+            document_id=str(document.id),
             title=DocumentTitle(
                 command.title,
             ).value,
@@ -316,12 +316,14 @@ class DocumentApplicationService:
                 status_code=404,
             )
 
-        if vector_store is not None and hasattr(
+        delete_document_chunks = getattr(
             vector_store,
             "delete_document_chunks",
-        ):
+            None,
+        )
+        if callable(delete_document_chunks):
             try:
-                vector_store.delete_document_chunks(
+                delete_document_chunks(
                     document_id=str(document.id),
                 )
             except Exception:
@@ -337,7 +339,7 @@ class DocumentApplicationService:
     def _change_status(
         self,
         *,
-        document_id: UUID,
+        document_id: str,
         status: str,
         failure_reason: str | None,
     ) -> DocumentDto:
@@ -365,7 +367,7 @@ class DocumentApplicationService:
         )
 
         updated = self.document_repository.update(
-            document_id=document.id,
+            document_id=str(document.id),
             title=document.title,
             description=document.description,
             status=status,
@@ -383,14 +385,16 @@ class DocumentApplicationService:
     ) -> str:
         provider = self.storage_provider
 
-        if hasattr(provider, "upload"):
-            result = provider.upload(
+        upload = getattr(provider, "upload", None)
+        upload_bytes = getattr(provider, "upload_bytes", None)
+        if callable(upload):
+            result = upload(
                 path=path,
                 content=content,
                 content_type=content_type,
             )
-        elif hasattr(provider, "upload_bytes"):
-            result = provider.upload_bytes(
+        elif callable(upload_bytes):
+            result = upload_bytes(
                 path=path,
                 content=content,
                 content_type=content_type,

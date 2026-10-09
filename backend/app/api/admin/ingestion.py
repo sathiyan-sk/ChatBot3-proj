@@ -4,25 +4,28 @@ import asyncio
 import logging
 import multiprocessing
 import os
+import queue as queue_module
+import socket
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from dataclasses import dataclass
+from typing import Any, Protocol
 from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    Depends,
     HTTPException,
     Request,
     status,
 )
-from sqlalchemy import and_, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
+    build_document_application_service,
+    build_knowledge_ingestion_pipeline,
     get_document_application_service,
-    get_knowledge_ingestion_pipeline,
-    get_session,
 )
 from app.api.schemas.ingestion import (
     IngestionResponse,
@@ -40,11 +43,30 @@ from app.modules.documents.application.commands import (
 from app.modules.documents.application.queries import (
     GetDocumentByIdQuery,
 )
-from app.modules.documents.application.services import (
-    DocumentApplicationService,
-)
+from app.config.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+class IngestionApplication(Protocol):
+    @property
+    def state(self) -> Any: ...
+
+
+class IngestionResultQueue(Protocol):
+    def put(self, item: tuple[str, str | None]) -> None: ...
+
+    def get(self, timeout: float) -> tuple[str, str | None]: ...
+
+
+@dataclass(slots=True)
+class _IngestionAppState:
+    settings: Settings
+    session_factory: Callable[[], Session]
+
+
+@dataclass(slots=True)
+class _IngestionApplication:
+    state: _IngestionAppState
 
 
 router = APIRouter(
@@ -238,7 +260,9 @@ def _resolve_source_identifier(
     )
 
 
-def _get_app_session_factory(app: object):
+def _get_app_session_factory(
+    app: IngestionApplication,
+) -> Callable[[], Session]:
     session_factory = getattr(app.state, "session_factory", None)
     if session_factory is None:
         raise RuntimeError(
@@ -250,6 +274,8 @@ def _get_app_session_factory(app: object):
 def claim_next_pending_document(
     session_factory,
     stale_after_minutes: int = 120,
+    *,
+    worker_id: int | None = None,
 ) -> str | None:
     session: Session = session_factory()
     try:
@@ -281,7 +307,13 @@ def claim_next_pending_document(
         session.commit()
         logger.info(
             "Claimed document ingestion job",
-            extra={"document_id": document_id, "reclaimed_stale_job": was_stale},
+            extra={
+                "document_id": document_id,
+                "reclaimed_stale_job": was_stale,
+                "worker_id": worker_id,
+                "worker_host": socket.gethostname(),
+                "worker_process_id": os.getpid(),
+            },
         )
         return document_id
     except Exception:
@@ -294,7 +326,7 @@ def claim_next_pending_document(
 async def run_document_ingestion_worker(
     session_factory,
     *,
-    application: object,
+    application: IngestionApplication,
     worker_id: int,
     stale_after_minutes: int = 120,
     poll_interval_seconds: float = 2.0,
@@ -307,6 +339,7 @@ async def run_document_ingestion_worker(
                 claim_next_pending_document,
                 session_factory,
                 stale_after_minutes,
+                worker_id=worker_id,
             )
             if document_id is None:
                 await asyncio.sleep(poll_interval_seconds)
@@ -382,24 +415,18 @@ def touch_document_ingestion_heartbeat(
 
 
 def _mark_document_failed_and_log(
-    session_factory,
+    session_factory: Callable[[], Session],
     document_id: str,
     reason: str,
-    settings: object,
+    settings: Settings,
 ) -> None:
     session: Session | None = None
     try:
-        session = session_factory()
-        service = get_document_application_service(
-            request=SimpleNamespace(
-                app=SimpleNamespace(
-                    state=SimpleNamespace(
-                        session_factory=session_factory,
-                        settings=settings,
-                    )
-                )
-            ),
-            session=session,
+        active_session = session_factory()
+        session = active_session
+        service = build_document_application_service(
+            settings=settings,
+            session=active_session,
         )
         service.mark_failed(
             MarkDocumentFailedCommand(
@@ -407,7 +434,7 @@ def _mark_document_failed_and_log(
                 failure_reason=reason,
             )
         )
-        session.commit()
+        active_session.commit()
         logger.error(
             "Document ingestion failed and was marked failed",
             extra={
@@ -429,7 +456,7 @@ def _mark_document_failed_and_log(
 
 def _run_document_ingestion_task_in_subprocess(
     document_id: str,
-    queue: object | None = None,
+    queue: IngestionResultQueue | None = None,
 ) -> None:
     session_factory = None
     try:
@@ -445,8 +472,8 @@ def _run_document_ingestion_task_in_subprocess(
 
         settings = get_settings()
         session_factory = create_session_factory(settings.database.url)
-        application = SimpleNamespace(
-            state=SimpleNamespace(
+        application = _IngestionApplication(
+            state=_IngestionAppState(
                 settings=settings,
                 session_factory=session_factory,
             )
@@ -467,90 +494,126 @@ def _run_document_ingestion_task_in_subprocess(
 
 def _execute_document_ingestion_with_timeout(
     document_id: str,
-    application: object,
+    application: IngestionApplication,
     *,
     timeout_seconds: int,
 ) -> None:
     if timeout_seconds <= 0:
         timeout_seconds = 300
 
-    context = multiprocessing.get_context("spawn")
-    queue_factory = getattr(context, "Queue", None) or multiprocessing.Queue
-    queue = queue_factory()
-    process = context.Process(
-        target=_run_document_ingestion_task_in_subprocess,
-        args=(document_id, queue),
-    )
-    process.start()
-    process.join(timeout=timeout_seconds)
-
-    if process.is_alive():
-        logger.warning(
-            "Document ingestion exceeded timeout; terminating worker process",
-            extra={
-                "document_id": document_id,
-                "timeout_seconds": timeout_seconds,
-            },
+    session_factory = getattr(application.state, "session_factory", None)
+    if session_factory is None:
+        raise RuntimeError(
+            "Application database session factory is not initialized."
         )
-        process.terminate()
-        process.join(5)
-        session_factory = getattr(application.state, "session_factory", None)
-        if session_factory is not None:
+
+    lock_session: Session = session_factory()
+    try:
+        lock_acquired = lock_session.execute(
+            text(
+                "SELECT pg_try_advisory_xact_lock("
+                "hashtextextended(:document_id, 0))"
+            ),
+            {"document_id": document_id},
+        ).scalar_one()
+    except Exception:
+        lock_session.close()
+        raise
+
+    if not lock_acquired:
+        lock_session.close()
+        logger.warning(
+            "Skipping duplicate document ingestion execution; another worker owns the lock",
+            extra={"document_id": document_id},
+        )
+        return
+
+    try:
+        context = multiprocessing.get_context("spawn")
+        queue_factory = getattr(context, "Queue", None) or multiprocessing.Queue
+        queue = queue_factory()
+        process = context.Process(
+            target=_run_document_ingestion_task_in_subprocess,
+            args=(document_id, queue),
+        )
+        process.start()
+        process.join(timeout=timeout_seconds)
+
+        if process.is_alive():
+            logger.warning(
+                "Document ingestion exceeded timeout; terminating worker process",
+                extra={
+                    "document_id": document_id,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            process.terminate()
+            process.join(5)
             _mark_document_failed_and_log(
                 session_factory,
                 document_id,
                 f"Document ingestion timed out after {timeout_seconds} seconds.",
                 application.state.settings,
             )
-        raise TimeoutError(
-            f"Document ingestion timed out after {timeout_seconds} seconds."
-        )
+            raise TimeoutError(
+                f"Document ingestion timed out after {timeout_seconds} seconds."
+            )
 
-    if process.exitcode not in (0, None):
-        session_factory = getattr(application.state, "session_factory", None)
-        if session_factory is not None:
+        if process.exitcode not in (0, None):
             _mark_document_failed_and_log(
                 session_factory,
                 document_id,
                 f"Document ingestion process exited unexpectedly with code {process.exitcode}.",
                 application.state.settings,
             )
-        raise RuntimeError(
-            f"Document ingestion process exited unexpectedly with code {process.exitcode}."
-        )
+            raise RuntimeError(
+                "Document ingestion process exited unexpectedly with code "
+                f"{process.exitcode}."
+            )
 
-    try:
-        if not queue.empty():
-            status, payload = queue.get_nowait()
-            if status == "error":
-                raise RuntimeError(payload or "document ingestion failed")
-    except Exception:
-        pass
+        try:
+            result_status, payload = queue.get(timeout=5)
+        except queue_module.Empty as exc:
+            logger.exception(
+                "Document ingestion subprocess exited without reporting a result",
+                extra={"document_id": document_id},
+            )
+            raise RuntimeError(
+                "Document ingestion subprocess exited without reporting a result."
+            ) from exc
+        if result_status == "error":
+            raise RuntimeError(payload or "document ingestion failed")
+        if result_status != "success":
+            raise RuntimeError(
+                f"Document ingestion subprocess returned unknown status: {result_status}."
+            )
+    finally:
+        lock_session.close()
 
 
 def run_document_ingestion_task(
     document_id: str,
-    application: object | None = None,
+    application: IngestionApplication | None = None,
 ) -> None:
-    from types import SimpleNamespace
-
     if application is None:
-        from app.main import app as application
+        from app.main import app
 
-    request_context = SimpleNamespace(app=application)
+        application = app
+
     session_factory = None
     session: Session | None = None
 
     try:
         session_factory = _get_app_session_factory(application)
-        session = session_factory()
+        active_session = session_factory()
+        session = active_session
         logger.info(
             "Document ingestion task started",
             extra={"document_id": document_id},
         )
-        document_service = get_document_application_service(
-            request=request_context,
-            session=session,
+        document_service = build_document_application_service(
+            settings=application.state.settings,
+            session=active_session,
         )
 
         document = document_service.get_by_id(
@@ -564,7 +627,7 @@ def run_document_ingestion_task(
                 document_id=document_id,
             )
         )
-        session.commit()
+        active_session.commit()
 
         source_identifier = _resolve_source_identifier(
             document,
@@ -574,10 +637,10 @@ def run_document_ingestion_task(
             source_identifier,
         )
 
-        ingestion_pipeline = get_knowledge_ingestion_pipeline(
+        ingestion_pipeline = build_knowledge_ingestion_pipeline(
             source_type=source_type,
-            request=request_context,
-            session=session,
+            settings=application.state.settings,
+            session=active_session,
         )
         parsing_contract = getattr(
             ingestion_pipeline.parser,
@@ -614,7 +677,7 @@ def run_document_ingestion_task(
                 document_id=document_id,
             )
         )
-        session.commit()
+        active_session.commit()
 
         logger.info(
             "Background document ingestion completed",
@@ -638,10 +701,11 @@ def run_document_ingestion_task(
                 _safe_rollback(session)
             if session_factory is None:
                 session_factory = _get_app_session_factory(application)
-            failure_session = session_factory()
-            failed_document_service = get_document_application_service(
-                request=request_context,
-                session=failure_session,
+            active_failure_session = session_factory()
+            failure_session = active_failure_session
+            failed_document_service = build_document_application_service(
+                settings=application.state.settings,
+                session=active_failure_session,
             )
             failed_document_service.mark_failed(
                 MarkDocumentFailedCommand(
@@ -649,7 +713,7 @@ def run_document_ingestion_task(
                     failure_reason=str(exc),
                 )
             )
-            failure_session.commit()
+            active_failure_session.commit()
         except Exception:
             if failure_session is not None:
                 _safe_rollback(failure_session)

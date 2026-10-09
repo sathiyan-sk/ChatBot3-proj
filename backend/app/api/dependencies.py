@@ -193,8 +193,17 @@ def get_document_application_service(
     request: Request,
     session: Session = Depends(get_session),
 ) -> DocumentApplicationService:
-    app_settings = request.app.state.settings
+    return build_document_application_service(
+        settings=request.app.state.settings,
+        session=session,
+    )
 
+
+def build_document_application_service(
+    *,
+    settings: Settings,
+    session: Session,
+) -> DocumentApplicationService:
     return DocumentApplicationService(
         document_repository=(
             SqlAlchemyDocumentRepository(
@@ -208,7 +217,7 @@ def get_document_application_service(
         ),
         storage_provider=(
             SupabaseStorageProvider(
-                settings=app_settings.storage,
+                settings=settings.storage,
             )
         ),
     )
@@ -356,8 +365,19 @@ def get_knowledge_ingestion_pipeline(
     request: Request,
     session: Session = Depends(get_session),
 ) -> KnowledgeIngestionPipeline:
-    settings = get_settings(request)
+    return build_knowledge_ingestion_pipeline(
+        source_type=source_type,
+        settings=get_settings(request),
+        session=session,
+    )
 
+
+def build_knowledge_ingestion_pipeline(
+    *,
+    source_type: str,
+    settings: Settings,
+    session: Session,
+) -> KnowledgeIngestionPipeline:
 
     storage_provider = SupabaseStorageProvider(
         settings=settings.storage,

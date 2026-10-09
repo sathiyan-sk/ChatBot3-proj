@@ -1,15 +1,31 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
+from fastapi import Request
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import Session
 
 from app.api.admin.ingestion import (
+    _IngestionAppState,
+    _IngestionApplication,
     _execute_document_ingestion_with_timeout,
     _run_document_ingestion_task_in_subprocess,
     claim_next_pending_document,
 )
 from app.api.system import get_ingestion_worker_status
+from app.config.settings import Settings
+from app.modules.documents.application.commands import MarkDocumentFailedCommand
+from app.modules.documents.application.services import DocumentApplicationService
+from app.modules.documents.domain.entities import Document
+from app.modules.documents.domain.repository_interfaces import (
+    DocumentRepositoryInterface,
+)
+from app.modules.knowledge_bases.domain.repository_interfaces import (
+    KnowledgeBaseRepositoryInterface,
+)
 
 
 class _ClaimResult:
@@ -38,6 +54,28 @@ class _ClaimSession:
 
     def rollback(self):
         raise AssertionError("claim should not need rollback")
+
+    def close(self):
+        self.closed = True
+
+
+class _AdvisoryLockResult:
+    def __init__(self, acquired):
+        self.acquired = acquired
+
+    def scalar_one(self):
+        return self.acquired
+
+
+class _AdvisoryLockSession:
+    def __init__(self, acquired=True):
+        self.acquired = acquired
+        self.closed = False
+
+    def execute(self, statement, parameters):
+        assert "pg_try_advisory_xact_lock" in str(statement)
+        assert parameters["document_id"] == "test-doc-id"
+        return _AdvisoryLockResult(self.acquired)
 
     def close(self):
         self.closed = True
@@ -120,26 +158,33 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
 
     class FakeContext:
         def Process(self, *args, **kwargs):
+            _ = (args, kwargs)
             return fake_process
 
     calls = {}
 
     def fake_fail_mark(session_factory, document_id, reason, settings):
+        _ = session_factory
         calls["failed"] = (document_id, str(reason), settings)
+
+    def fake_get_context(*args, **kwargs):
+        _ = (args, kwargs)
+        return FakeContext()
 
     monkeypatch.setattr(
         "app.api.admin.ingestion.multiprocessing.get_context",
-        lambda *args, **kwargs: FakeContext(),
+        fake_get_context,
     )
     monkeypatch.setattr(
         "app.api.admin.ingestion._mark_document_failed_and_log",
         fake_fail_mark,
     )
 
-    app = SimpleNamespace(
-        state=SimpleNamespace(
-            settings=SimpleNamespace(ingestion_timeout_seconds=5),
-            session_factory=lambda: object(),
+    settings = cast(Settings, SimpleNamespace(ingestion_timeout_seconds=5))
+    app = _IngestionApplication(
+        state=_IngestionAppState(
+            settings=settings,
+            session_factory=lambda: cast(Session, _AdvisoryLockSession()),
         )
     )
 
@@ -159,8 +204,38 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
     assert calls["failed"][2] is app.state.settings
 
 
+def test_duplicate_execution_skips_subprocess_when_advisory_lock_is_held(
+    monkeypatch,
+):
+    lock_session = _AdvisoryLockSession(acquired=False)
+    settings = cast(Settings, SimpleNamespace(ingestion_timeout_seconds=5))
+    app = _IngestionApplication(
+        state=_IngestionAppState(
+            settings=settings,
+            session_factory=lambda: cast(Session, lock_session),
+        )
+    )
+
+    def fail_if_started(*args, **kwargs):
+        _ = (args, kwargs)
+        raise AssertionError("A duplicate execution must not start a process.")
+
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.multiprocessing.get_context",
+        fail_if_started,
+    )
+
+    _execute_document_ingestion_with_timeout(
+        "test-doc-id",
+        app,
+        timeout_seconds=5,
+    )
+
+    assert lock_session.closed
+
+
 def test_timeout_failure_marker_provides_application_settings(monkeypatch):
-    settings = SimpleNamespace(storage=object())
+    settings = cast(Settings, SimpleNamespace(storage=object()))
     observed = {}
 
     class FakeSession:
@@ -175,16 +250,16 @@ def test_timeout_failure_marker_provides_application_settings(monkeypatch):
             observed["command"] = command
 
     monkeypatch.setattr(
-        "app.api.admin.ingestion.get_document_application_service",
-        lambda request, session: (
-            observed.update(settings=request.app.state.settings) or FakeService()
+        "app.api.admin.ingestion.build_document_application_service",
+        lambda settings, session: (
+            observed.update(settings=settings, session=session) or FakeService()
         ),
     )
 
     from app.api.admin.ingestion import _mark_document_failed_and_log
 
     _mark_document_failed_and_log(
-        lambda: FakeSession(),
+        lambda: cast(Session, FakeSession()),
         "test-doc-id",
         "timeout",
         settings,
@@ -193,6 +268,63 @@ def test_timeout_failure_marker_provides_application_settings(monkeypatch):
     assert observed["settings"] is settings
     assert observed["committed"] is True
     assert observed["closed"] is True
+
+
+def test_marking_failed_document_failed_again_is_idempotent():
+    document_id = uuid4()
+    now = datetime.now(timezone.utc)
+    existing_document = Document(
+        id=document_id,
+        application_id=uuid4(),
+        knowledge_base_id=uuid4(),
+        title="Test document",
+        description=None,
+        source_type="file",
+        source_uri=None,
+        storage_path="test.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=1,
+        checksum_sha256=None,
+        status="failed",
+        failure_reason="First timeout",
+        created_at=now,
+        updated_at=now,
+    )
+
+    class FakeDocumentRepository:
+        def get_by_id(self, requested_id):
+            assert requested_id == str(document_id)
+            return existing_document
+
+        def update(self, **changes):
+            return replace(
+                existing_document,
+                title=changes["title"],
+                description=changes["description"],
+                status=changes["status"],
+                failure_reason=changes["failure_reason"],
+            )
+
+    service = DocumentApplicationService(
+        document_repository=cast(
+            DocumentRepositoryInterface,
+            FakeDocumentRepository(),
+        ),
+        knowledge_base_repository=cast(
+            KnowledgeBaseRepositoryInterface,
+            object(),
+        ),
+    )
+
+    result = service.mark_failed(
+        MarkDocumentFailedCommand(
+            document_id=str(document_id),
+            failure_reason="Second timeout",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.failure_reason == "Second timeout"
 
 
 def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
@@ -206,9 +338,14 @@ def test_subprocess_initializes_database_state_before_ingestion(monkeypatch):
         "app.config.settings.get_settings",
         lambda: settings,
     )
+
+    def fake_session_factory(database_url):
+        assert database_url == "postgresql://test"
+        return factory
+
     monkeypatch.setattr(
         "app.infrastructure.db.session.create_session_factory",
-        lambda database_url: factory,
+        fake_session_factory,
     )
     monkeypatch.setattr(
         "app.api.admin.ingestion.run_document_ingestion_task",
@@ -244,7 +381,7 @@ def test_worker_health_endpoint_reports_running_and_failed_workers():
         )
     )
 
-    assert get_ingestion_worker_status(request) == {
+    assert get_ingestion_worker_status(cast(Request, request)) == {
         "worker_count": 2,
         "running_workers": 1,
         "healthy": False,

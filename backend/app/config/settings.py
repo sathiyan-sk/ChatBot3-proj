@@ -318,7 +318,7 @@ def load_settings() -> Settings:
         ),
         ingestion_timeout_seconds=max(
             30,
-            int(os.getenv("INGESTION_TIMEOUT_SECONDS", "300")),
+            int(os.getenv("INGESTION_TIMEOUT_SECONDS", "900")),
         ),
         langsmith_tracing=langsmith_tracing,
         langsmith_api_key=langsmith_api_key,
