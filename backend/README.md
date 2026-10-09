@@ -48,7 +48,31 @@ Supabase and must not be run against an existing database that already has
 these tables. The older SQL files in `migrations/` are legacy repair scripts,
 not the fresh-database bootstrap path.
 
-## .Create project
+## Optional LangSmith tracing
+
+LangSmith tracing is disabled by default. The QA pipeline is recorded as a
+parent `chain` run and its LLM provider call as a nested `llm` run. Both carry
+the HTTP `X-Request-ID` value as trace metadata. Provider runs include the
+normalized model, token usage, and latency values returned by OpenRouter or
+Ollama.
+
+Enable tracing by setting these backend environment variables:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=your-project-name
+# Optional for a custom/self-hosted API:
+LANGSMITH_ENDPOINT=
+```
+
+When tracing is disabled, no LangSmith client is created and credentials are
+not required. The SDK client is created once during application startup and
+flushed during shutdown.
+
+Tracing includes the customer query and LLM prompts/answer, which can contain
+conversation history and retrieved business documents. Enable it only when
+that data is approved for transfer to the configured LangSmith workspace.
 
 ## Render CORS configuration
 

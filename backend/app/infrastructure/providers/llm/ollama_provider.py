@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import httpx
 
 from app.core.exceptions import ApplicationError
+from app.knowledge_engine.contracts.llm import LlmGenerationResult
 from app.knowledge_engine.domain.provider_interfaces import LlmProvider
 
 
@@ -18,7 +20,7 @@ class OllamaLlmProvider(LlmProvider):
         system_prompt: str,
         user_prompt: str,
         temperature: float | None = None,
-    ) -> str:
+    ) -> LlmGenerationResult:
         normalized_system = system_prompt.strip()
         normalized_user = user_prompt.strip()
 
@@ -54,6 +56,7 @@ class OllamaLlmProvider(LlmProvider):
             },
         }
 
+        started_at = time.perf_counter()
         try:
             response = httpx.post(
                 url,
@@ -81,4 +84,25 @@ class OllamaLlmProvider(LlmProvider):
                 status_code=502,
             )
 
-        return generated_text.strip()
+        input_tokens = response_payload.get("prompt_eval_count")
+        output_tokens = response_payload.get("eval_count")
+        total_tokens = (
+            int(input_tokens or 0) + int(output_tokens or 0)
+            if input_tokens is not None or output_tokens is not None
+            else None
+        )
+        provider_duration_ns = response_payload.get("total_duration")
+
+        return LlmGenerationResult(
+            text=generated_text.strip(),
+            model=str(response_payload.get("model") or model),
+            input_tokens=(int(input_tokens) if input_tokens is not None else None),
+            output_tokens=(int(output_tokens) if output_tokens is not None else None),
+            total_tokens=total_tokens,
+            latency_ms=(time.perf_counter() - started_at) * 1000,
+            provider_duration_ms=(
+                float(provider_duration_ns) / 1_000_000
+                if isinstance(provider_duration_ns, (int, float))
+                else None
+            ),
+        )

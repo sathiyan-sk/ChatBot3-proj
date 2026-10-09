@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 
 import httpx
 
 from app.core.exceptions import ApplicationError
+from app.knowledge_engine.contracts.llm import LlmGenerationResult
 from app.knowledge_engine.domain.provider_interfaces import LlmProvider
 
 
@@ -19,7 +21,7 @@ class OpenRouterLlmProvider(LlmProvider):
         system_prompt: str,
         user_prompt: str,
         temperature: float | None = None,
-    ) -> str:
+    ) -> LlmGenerationResult:
         normalized_system = system_prompt.strip()
         normalized_user = user_prompt.strip()
 
@@ -92,6 +94,7 @@ class OpenRouterLlmProvider(LlmProvider):
         )
 
         last_error: str = "no models attempted"
+        started_at = time.perf_counter()
 
         for model in models:
             payload = {
@@ -124,7 +127,29 @@ class OpenRouterLlmProvider(LlmProvider):
                     continue
 
                 if isinstance(generated_text, str) and generated_text.strip():
-                    return generated_text.strip()
+                    usage = response_payload.get("usage") or {}
+                    input_tokens = usage.get("prompt_tokens")
+                    output_tokens = usage.get("completion_tokens")
+                    total_tokens = usage.get("total_tokens")
+                    if total_tokens is None and (
+                        input_tokens is not None or output_tokens is not None
+                    ):
+                        total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+                    return LlmGenerationResult(
+                        text=generated_text.strip(),
+                        model=str(response_payload.get("model") or model),
+                        input_tokens=(
+                            int(input_tokens) if input_tokens is not None else None
+                        ),
+                        output_tokens=(
+                            int(output_tokens) if output_tokens is not None else None
+                        ),
+                        total_tokens=(
+                            int(total_tokens) if total_tokens is not None else None
+                        ),
+                        latency_ms=(time.perf_counter() - started_at) * 1000,
+                    )
 
                 last_error = f"{model}: empty response text"
                 continue

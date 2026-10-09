@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
 
@@ -44,6 +45,7 @@ router = APIRouter(
 )
 def create_chat_message(
     request: ChatMessageRequest,
+    http_request: Request,
     application_context: ClientApplicationContext = Depends(
         get_client_application_context,
     ),
@@ -70,6 +72,7 @@ def create_chat_message(
                 request.conversation_title
             ),
             top_k=request.top_k,
+            request_id=getattr(http_request.state, "request_id", None),
         )
     )
 
@@ -101,6 +104,7 @@ def create_chat_message(
 )
 def create_widget_chat_message(
     request: ChatMessageRequest,
+    http_request: Request,
     application_id: str = Depends(
         get_widget_application_id,
     ),
@@ -119,6 +123,7 @@ def create_widget_chat_message(
                 request.conversation_title
             ),
             top_k=request.top_k,
+            request_id=getattr(http_request.state, "request_id", None),
         )
     )
 

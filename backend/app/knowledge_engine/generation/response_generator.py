@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.knowledge_engine.contracts.llm import LlmGenerationResult
 from app.knowledge_engine.domain.provider_interfaces import LlmProvider
 from app.knowledge_engine.generation.response_formatter import ResponseFormatter
 
@@ -18,7 +19,7 @@ class ResponseGenerator:
         user_prompt: str,
         conversation_context: list[dict[str, str]] | None = None,
         temperature: float | None = None,
-    ) -> str:
+    ) -> LlmGenerationResult:
         return self.llm_contract.generate(
             system_prompt=system_prompt,
             user_prompt=user_prompt,

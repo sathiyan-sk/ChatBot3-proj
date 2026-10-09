@@ -90,8 +90,29 @@ class Settings:
     ingestion_stale_after_minutes: int = 15
     document_ingestion_concurrency: int = 1
     ingestion_timeout_seconds: int = 300
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+    langsmith_project: str | None = None
+    langsmith_endpoint: str | None = None
 
 def load_settings() -> Settings:
+    langsmith_tracing = os.getenv(
+        "LANGSMITH_TRACING",
+        "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    langsmith_api_key = os.getenv("LANGSMITH_API_KEY", "").strip() or None
+    langsmith_project = os.getenv("LANGSMITH_PROJECT", "").strip() or None
+    langsmith_endpoint = os.getenv("LANGSMITH_ENDPOINT", "").strip() or None
+
+    if langsmith_tracing and not langsmith_api_key:
+        raise ValueError(
+            "LANGSMITH_API_KEY is required when LANGSMITH_TRACING is enabled."
+        )
+    if langsmith_tracing and not langsmith_project:
+        raise ValueError(
+            "LANGSMITH_PROJECT is required when LANGSMITH_TRACING is enabled."
+        )
+
     provider_timeout_seconds = float(
         os.getenv(
             "PROVIDER_TIMEOUT_SECONDS",
@@ -299,6 +320,10 @@ def load_settings() -> Settings:
             30,
             int(os.getenv("INGESTION_TIMEOUT_SECONDS", "300")),
         ),
+        langsmith_tracing=langsmith_tracing,
+        langsmith_api_key=langsmith_api_key,
+        langsmith_project=langsmith_project,
+        langsmith_endpoint=langsmith_endpoint,
     )
 
 

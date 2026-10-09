@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.knowledge_engine.contracts.llm import LlmGenerationResult
+
 
 @dataclass(slots=True, frozen=True)
 class RawSource:
@@ -93,6 +95,7 @@ class QuestionAnsweringPipelineRequest:
     max_context_messages: int = 12
     llm_temperature: float | None = None
     prompt_system_template: str | None = None
+    request_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -100,3 +103,4 @@ class QuestionAnsweringPipelineResult:
     answer_text: str
     citations: list[Citation]
     retrieved_chunks: list[RetrievedChunk]
+    llm_generation: LlmGenerationResult | None = None

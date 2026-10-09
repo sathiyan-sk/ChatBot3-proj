@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
-from app.knowledge_engine.domain.models import KnowledgeChunk
+from app.knowledge_engine.shared.models import RetrievedChunk
 
 
 class Reranker:
@@ -10,16 +11,16 @@ class Reranker:
         self,
         *,
         query_text: str,
-        chunks: list[KnowledgeChunk],
+        chunks: list[RetrievedChunk],
         top_k: int,
-    ) -> list[KnowledgeChunk]:
+    ) -> list[RetrievedChunk]:
         if not chunks:
             return []
 
         query_tokens = self._tokenize(query_text)
         query_token_set = set(query_tokens)
 
-        scored_chunks: list[tuple[KnowledgeChunk, float]] = []
+        scored_chunks: list[tuple[RetrievedChunk, float]] = []
 
         for chunk in chunks:
             chunk_tokens = self._tokenize(chunk.content)
@@ -46,15 +47,7 @@ class Reranker:
         for chunk, score in scored_chunks[:top_k]:
             # Create a new chunk with updated score
             reranked.append(
-                KnowledgeChunk(
-                    chunk_id=chunk.chunk_id,
-                    document_id=chunk.document_id,
-                    document_title=chunk.document_title,
-                    content=chunk.content,
-                    source_uri=chunk.source_uri,
-                    score=score,  # Updated rerank score
-                    metadata=chunk.metadata,
-                )
+                replace(chunk, score=score)
             )
 
         return reranked[:top_k]

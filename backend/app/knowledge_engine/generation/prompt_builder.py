@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.knowledge_engine.domain.models import KnowledgeChunk
+from app.knowledge_engine.shared.models import RetrievedChunk
 
 
 class PromptBuilder:
@@ -55,7 +55,7 @@ class PromptBuilder:
         *,
         query_text: str,
         conversation_messages: list[dict[str, str]] | None = None,
-        retrieved_chunks: list[KnowledgeChunk],
+        retrieved_chunks: list[RetrievedChunk],
     ) -> str:
         """
         Builds the user prompt containing context + question.

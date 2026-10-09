@@ -10,3 +10,4 @@ class AskChatQuestionCommand:
     message_text: str
     conversation_title: str | None = None
     top_k: int = 5
+    request_id: str | None = None

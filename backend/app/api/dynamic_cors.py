@@ -159,6 +159,9 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
             logger.debug(f"Origin matches local prefix/dev origin: {origin}")
             return True
 
+        request_url = getattr(request, "url", None)
+        request_path = getattr(request_url, "path", "") if request_url is not None else ""
+
         widget_key = (
             request.headers.get("X-Widget-Key")
             or request.headers.get("X-API-Key")
@@ -174,17 +177,16 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
                         request.headers.get("access-control-request-headers") or ""
                     ).split(",")
                 }
-                path = request.url.path
                 widget_key_preflight = (
                     "x-widget-key" in requested_headers
                     and (
-                        path.startswith("/api/client/widget/")
-                        or path == "/api/client/chat/widget/messages"
+                        request_path.startswith("/api/client/widget/")
+                        or request_path == "/api/client/chat/widget/messages"
                     )
                 )
                 api_key_preflight = (
                     "x-api-key" in requested_headers
-                    and path == "/api/client/chat/messages"
+                    and request_path == "/api/client/chat/messages"
                 )
                 if widget_key_preflight or api_key_preflight:
                     logger.debug("Preflight includes the expected key header for the client route")
@@ -200,7 +202,7 @@ class DynamicCorsMiddleware(BaseHTTPMiddleware):
             )
         }
         if (
-            request.url.path == "/api/client/chat/messages"
+            request_path == "/api/client/chat/messages"
             and normalized in trusted_frontend_origins
         ):
             return True

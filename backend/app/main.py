@@ -12,10 +12,14 @@ from app.api.admin.ingestion import run_document_ingestion_worker
 from app.api.dependencies import get_knowledge_ingestion_pipeline
 from app.api.dynamic_cors import register_dynamic_cors_middleware
 from app.api.error_handlers import register_exception_handlers
+from app.api.middleware import register_middlewares
 from app.api.router import api_router
 from app.composition import build_application_container
+from app.config.security import load_security_settings
 from app.config.settings import get_settings
 from app.infrastructure.db.session import create_session_factory
+from app.infrastructure.observability.metrics import InMemoryMetricsRegistry
+from app.infrastructure.observability.tracing import create_trace_observer
 from app.modules.conversations.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
 )
@@ -66,6 +70,7 @@ def create_lifespan(settings, session_factory):
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.session_factory = session_factory
+        app.state.trace_observer = create_trace_observer(settings)
 
         app.state.container = build_application_container(
             settings=settings,
@@ -125,6 +130,7 @@ def create_lifespan(settings, session_factory):
             for worker in ingestion_workers:
                 worker.cancel()
             await asyncio.gather(*ingestion_workers, return_exceptions=True)
+            app.state.trace_observer.flush()
     
     return lifespan
 
@@ -159,14 +165,19 @@ def create_app() -> FastAPI:
         allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?" if settings.cors_allow_local_origins else None,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Origin", "X-Widget-Key", "X-API-Key", "Authorization", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
-        expose_headers=["Content-Type", "X-Widget-Key"],
+        allow_headers=["Content-Type", "Origin", "X-Widget-Key", "X-API-Key", "X-Request-ID", "Authorization", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
+        expose_headers=["Content-Type", "X-Widget-Key", "X-Request-ID"],
     )
 
     register_dynamic_cors_middleware(
         app,
         settings=settings,
         session_factory=session_factory,
+    )
+    register_middlewares(
+        app,
+        security_settings=load_security_settings(),
+        metrics_registry=InMemoryMetricsRegistry(),
     )
 
     register_exception_handlers(app)

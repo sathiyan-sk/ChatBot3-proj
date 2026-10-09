@@ -126,6 +126,7 @@ class ChatApplicationService:
                     if application_settings is not None
                     else None
                 ),
+                request_id=command.request_id,
             )
         )
 

@@ -9,6 +9,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
+from app.infrastructure.observability.tracing import TracedLlmProvider
 from app.infrastructure.providers.embeddings.nomic_provider import (
     NomicEmbeddingsProvider,
 )
@@ -259,6 +260,7 @@ def get_question_answering_pipeline(
     session: Session = Depends(get_session),
     ) -> QuestionAnsweringPipeline:
     settings = get_settings(request)
+    trace_observer = request.app.state.trace_observer
 
 
     if settings.providers.embeddings.strip().lower() == "openrouter":
@@ -279,6 +281,11 @@ def get_question_answering_pipeline(
     else:
         llm_provider = OllamaLlmProvider(
             settings=settings.ollama,
+    )
+
+    traced_llm_provider = TracedLlmProvider(
+    provider=llm_provider,
+    trace_observer=trace_observer,
     )
 
     vector_provider = PgVectorProvider(
@@ -305,11 +312,12 @@ def get_question_answering_pipeline(
         prompt_builder=PromptBuilder(),
         response_generator=(
             ResponseGenerator(
-                llm_contract=llm_provider,
+                llm_contract=traced_llm_provider,
             )
         ),
         citation_builder=CitationBuilder(),
         response_formatter=ResponseFormatter(),
+        trace_observer=trace_observer,
     )
 
 
