@@ -457,7 +457,7 @@ def _mark_document_failed_and_log(
         if result.rowcount != 1:
             active_session.rollback()
             logger.warning(
-                "Skipped failure update for superseded document ingestion version",
+                "Skipped failure update because this attempt is no longer processing",
                 extra={
                     "document_id": document_id,
                     "ingestion_version": ingestion_version,
@@ -820,7 +820,7 @@ def run_document_ingestion_task(
                 else:
                     active_failure_session.rollback()
                     logger.warning(
-                        "Skipped failure update for superseded document ingestion version",
+                        "Skipped failure update because this attempt is no longer processing",
                         extra={
                             "document_id": document_id,
                             "ingestion_version": ingestion_version,

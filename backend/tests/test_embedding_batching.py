@@ -2,7 +2,9 @@ from types import SimpleNamespace
 import time
 
 import httpx
+import pytest
 
+from app.core.exceptions import ApplicationError
 from app.infrastructure.providers.embeddings.openrouter_embeddings_provider import (
     OpenRouterEmbeddingsProvider,
 )
@@ -120,6 +122,34 @@ def test_openrouter_retries_transient_read_timeout(monkeypatch):
 
     assert _provider().embed_query("some text") == [0.1, 0.2]
     assert attempts == 2
+
+
+def test_openrouter_402_returns_actionable_billing_error_without_retry(monkeypatch):
+    attempts = 0
+
+    def fake_post(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        request = httpx.Request(
+            "POST",
+            "https://openrouter.ai/api/v1/embeddings",
+        )
+        response = httpx.Response(402, request=request)
+        response.raise_for_status()
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.embeddings.openrouter_embeddings_provider.httpx.post",
+        fake_post,
+    )
+
+    with pytest.raises(ApplicationError) as error:
+        _provider().embed_query("some text")
+
+    assert attempts == 1
+    assert error.value.code == "embedding_provider_payment_required"
+    assert error.value.details == {"upstream_status": 402}
+    assert "credits" in error.value.message
+    assert "configured embedding model" in error.value.message
 
 
 def test_embedding_generator_uses_batch_api_and_preserves_chunk_metadata():

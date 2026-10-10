@@ -165,6 +165,11 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
                 response.raise_for_status()
                 return response
             except httpx.HTTPError as exc:
+                upstream_status = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 retryable = (
                     isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
                     or (
@@ -176,15 +181,33 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
                     )
                 )
                 if not retryable or attempt == max_attempts:
+                    if upstream_status == 402:
+                        message = (
+                            "OpenRouter rejected the embedding request with HTTP 402 "
+                            "(Payment Required). Check the account's credits, billing "
+                            "status, and access to the configured embedding model."
+                        )
+                        logger.error(
+                            "OpenRouter embeddings request requires account billing attention",
+                            extra={"upstream_status": upstream_status},
+                        )
+                        raise ApplicationError(
+                            message=message,
+                            code="embedding_provider_payment_required",
+                            status_code=503,
+                            details={"upstream_status": upstream_status},
+                        ) from exc
                     logger.warning(
-                        "OpenRouter embeddings request failed after %s attempt(s): %s",
+                        "OpenRouter embeddings request failed after %s attempt(s): %s (status=%s)",
                         attempt,
                         type(exc).__name__,
+                        upstream_status,
                     )
                     raise ApplicationError(
                         message=(
                             "OpenRouter embeddings request failed after "
-                            f"{attempt} attempt(s): {type(exc).__name__}."
+                            f"{attempt} attempt(s): {type(exc).__name__}"
+                            f"{f' (HTTP {upstream_status})' if upstream_status else ''}."
                         ),
                         code="embedding_provider_failed",
                         status_code=502,
