@@ -5,7 +5,7 @@ import {
   ArrowLeft, Database, MessageSquare, Settings, Play,
   Trash2, Copy, Check, UploadCloud, FileText,
   Sparkles, Sliders, Globe, Eye, Terminal, RefreshCw,
-  Plus, Archive, RotateCcw, XCircle, KeyRound, Pencil, Power,
+  Plus, RotateCcw, XCircle, KeyRound, Pencil, Power,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConversationsTab from "@/components/ConversationsTab";
@@ -1171,16 +1171,6 @@ export default function ApplicationDetail() {
                                           <XCircle className="h-3.5 w-3.5" />
                                         </button>
                                       )}
-                                      {doc.status !== "archived" && (
-                                        <button
-                                          onClick={() => handleDocAction(doc.id, "archive")}
-                                          className="p-1.5 border border-slate-500/15 hover:border-slate-500/40 rounded-[8px] hover:bg-slate-500/10 text-slate-400 hover:text-slate-200 transition focus:outline-none"
-                                          title="Archive"
-                                          data-testid={`archive-btn-${doc.id}`}
-                                        >
-                                          <Archive className="h-3.5 w-3.5" />
-                                        </button>
-                                      )}
                                       <button
                                         onClick={() => handleDeleteDoc(doc.id, doc.title)}
                                         className="p-1.5 border border-red-500/15 hover:border-red-500/40 rounded-[8px] hover:bg-red-500/10 text-red-400 hover:text-red-300 transition focus:outline-none"
@@ -1842,7 +1832,7 @@ export default function ApplicationDetail() {
         title="Delete document"
         message={
           deleteTarget
-            ? `Are you sure you want to delete and un-index "${deleteTarget.name}"? This cannot be undone.`
+            ? `Are you sure you want to delete "${deleteTarget.name}" and remove its indexed content? This cannot be undone.`
             : ""
         }
         confirmLabel="Delete"

@@ -20,6 +20,7 @@ from fastapi import (
 
 from app.api.dependencies import (
     get_document_application_service,
+    get_session,
     get_settings,
     require_admin,
 )
@@ -31,6 +32,7 @@ from app.api.schemas.documents import (
 )
 from app.config.settings import Settings
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
+from sqlalchemy.orm import Session
 from app.modules.documents.application.commands import (
     ArchiveDocumentCommand,
     CreateDocumentCommand,
@@ -341,37 +343,26 @@ def archive_document(
 )
 def delete_document(
     document_id: UUID,
-    background_tasks: BackgroundTasks,
-    request: Request,
+    session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
     service: DocumentApplicationService = Depends(
         get_document_application_service,
     ),
 ) -> Response:
-    # Un-index vectors in the background (best-effort) so the delete
-    # request stays fast even for large documents. Reuses the app-wide
-    # session factory (no new engine per request).
-    session_factory = request.app.state.session_factory
+    document = service.get_by_id(
+        GetDocumentByIdQuery(document_id=str(document_id)),
+    )
+    if document.status == "processing":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a document while ingestion is processing.",
+        )
 
-    def _cleanup_vectors() -> None:
-        session = session_factory()
-        try:
-            vector_provider = PgVectorProvider(
-                settings=settings,
-                session=session,
-            )
-            vector_provider.delete_document_chunks(
-                document_id=str(document_id),
-            )
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            # Consider logging: logger.error(f"Vector cleanup failed: {e}")
-        finally:
-            session.close()
-
-    background_tasks.add_task(_cleanup_vectors)
-
+    vector_provider = PgVectorProvider(
+        settings=settings,
+        session=session,
+    )
+    vector_provider.delete_document_chunks(document_id=str(document_id))
     deleted = service.delete(
         DeleteDocumentCommand(
             document_id=str(document_id),
