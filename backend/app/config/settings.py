@@ -52,6 +52,26 @@ class OpenRouterSettings:
     fallback_models: tuple[str, ...] = ()
     embedding_batch_size: int = 64
 
+
+@dataclass(slots=True, frozen=True)
+class HuggingFaceSettings:
+    token: str
+    embedding_model: str
+    inference_provider: str
+    provider_timeout_seconds: float
+    embedding_batch_size: int
+
+
+@dataclass(slots=True, frozen=True)
+class OpenAIEmbeddingsSettings:
+    base_url: str
+    api_key: str
+    embedding_model: str
+    embedding_dimensions: int
+    provider_timeout_seconds: float
+    embedding_batch_size: int
+
+
 @dataclass(slots=True, frozen=True)
 class ProviderSettings:
     llm: str
@@ -69,6 +89,8 @@ class Settings:
     storage: StorageSettings
     ollama: OllamaSettings
     openrouter: OpenRouterSettings
+    huggingface: HuggingFaceSettings
+    openai_embeddings: OpenAIEmbeddingsSettings
 
     # These fields are intentionally on the root Settings
     # object because PgVectorProvider expects:
@@ -274,6 +296,51 @@ def load_settings() -> Settings:
                     "",
                 ).split(",")
                 if item.strip()
+            ),
+        ),
+        huggingface=HuggingFaceSettings(
+            token=os.getenv("HF_TOKEN", "").strip(),
+            embedding_model=os.getenv(
+                "HF_EMBEDDING_MODEL",
+                "BAAI/bge-large-en-v1.5",
+            ),
+            inference_provider=os.getenv(
+                "HF_INFERENCE_PROVIDER",
+                "hf-inference",
+            ),
+            provider_timeout_seconds=float(
+                os.getenv(
+                    "HF_INFERENCE_TIMEOUT_SECONDS",
+                    str(provider_timeout_seconds),
+                )
+            ),
+            embedding_batch_size=min(
+                64,
+                max(1, int(os.getenv("HF_EMBEDDING_BATCH_SIZE", "32"))),
+            ),
+        ),
+        openai_embeddings=OpenAIEmbeddingsSettings(
+            base_url=os.getenv(
+                "OPENAI_BASE_URL",
+                "https://api.openai.com/v1",
+            ).rstrip("/"),
+            api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            embedding_model=os.getenv(
+                "OPENAI_EMBEDDING_MODEL",
+                "text-embedding-3-small",
+            ),
+            embedding_dimensions=int(
+                os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "1024")
+            ),
+            provider_timeout_seconds=float(
+                os.getenv(
+                    "OPENAI_EMBEDDING_TIMEOUT_SECONDS",
+                    str(provider_timeout_seconds),
+                )
+            ),
+            embedding_batch_size=min(
+                64,
+                max(1, int(os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", "32"))),
             ),
         ),
         vector_store_table_name=os.getenv(

@@ -10,11 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
 from app.infrastructure.observability.tracing import TracedLlmProvider
-from app.infrastructure.providers.embeddings.nomic_provider import (
-    NomicEmbeddingsProvider,
-)
-from app.infrastructure.providers.embeddings.openrouter_embeddings_provider import (
-    OpenRouterEmbeddingsProvider,
+from app.infrastructure.providers.embeddings.factory import (
+    build_embeddings_provider,
 )
 from app.infrastructure.providers.llm.ollama_provider import OllamaLlmProvider
 from app.infrastructure.providers.llm.openrouter_provider import (
@@ -272,14 +269,7 @@ def get_question_answering_pipeline(
     trace_observer = request.app.state.trace_observer
 
 
-    if settings.providers.embeddings.strip().lower() == "openrouter":
-        embeddings_provider = OpenRouterEmbeddingsProvider(
-            settings=settings.openrouter,
-        )
-    else:
-        embeddings_provider = NomicEmbeddingsProvider(
-            settings=settings,
-        )
+    embeddings_provider = build_embeddings_provider(settings)
 
 
     if settings.providers.llm.strip().lower() == "openrouter":
@@ -384,14 +374,7 @@ def build_knowledge_ingestion_pipeline(
     )
 
 
-    if settings.providers.embeddings.strip().lower() == "openrouter":
-        embeddings_provider = OpenRouterEmbeddingsProvider(
-            settings=settings.openrouter,
-        )
-    else:
-        embeddings_provider = NomicEmbeddingsProvider(
-            settings=settings,
-        )
+    embeddings_provider = build_embeddings_provider(settings)
 
     vector_provider = PgVectorProvider(
         settings=settings,

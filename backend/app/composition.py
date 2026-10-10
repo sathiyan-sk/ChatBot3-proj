@@ -5,9 +5,8 @@ from dataclasses import dataclass
 from sqlalchemy.orm import sessionmaker
 
 from app.config.settings import Settings
-from app.infrastructure.providers.embeddings.nomic_provider import NomicEmbeddingsProvider
-from app.infrastructure.providers.embeddings.openrouter_embeddings_provider import (
-    OpenRouterEmbeddingsProvider,
+from app.infrastructure.providers.embeddings.factory import (
+    build_embeddings_provider,
 )
 from app.infrastructure.providers.llm.ollama_provider import OllamaLlmProvider
 from app.infrastructure.providers.llm.openrouter_provider import OpenRouterLlmProvider
@@ -36,9 +35,7 @@ def _select_llm_provider(settings: Settings):
 
 
 def _select_embeddings_provider(settings: Settings):
-    if settings.providers.embeddings.strip().lower() == "openrouter":
-        return OpenRouterEmbeddingsProvider(settings=settings.openrouter)
-    return NomicEmbeddingsProvider(settings=settings)
+    return build_embeddings_provider(settings)
 
 
 @dataclass(slots=True)
