@@ -133,27 +133,30 @@ performance gain is assumed.
 PDF and DOCX parsing is selected independently with
 `DOCUMENT_PARSER_PROVIDER=docling` (the default) or `native`. Docling processes
 PDF/DOCX uploads directly and conversion errors fail that ingestion attempt;
-the application does not silently retry with another parser. For PDFs, OCR is
-enabled so scanned pages can be read as well as selectable text. No minimum
-section count or selectable-text precheck is applied. If conversion still
-produces no indexable text, ingestion fails explicitly rather than publishing a
-ready document with zero vectors. Docling exports heading-aware sections and
-tables as Markdown; section headings are carried into generated chunks. Text,
-Markdown, JSON, CSV, website, and image sources keep their dedicated parsers.
+the application does not silently retry with another parser. Docling PDF
+processing uses layout and table structure analysis with OCR explicitly
+disabled. It extracts text available in the PDF; scanned/image-only pages are
+not OCR'd. No selectable-text precheck is performed, but a document that
+produces no usable text chunks cannot be published as ready. Docling exports
+heading-aware sections and tables as Markdown; section headings are carried
+into generated chunks. Text, Markdown, JSON, CSV, website, and image sources
+keep their dedicated parsers.
 
-Docling's PDF layout, OCR, and table analysis are more compute-intensive than
-plain text extraction and may download model artifacts on first use. The
-ingestion worker runs each document in a fresh subprocess and enforces
-`INGESTION_TIMEOUT_SECONDS` (default `900`), so first-use downloads and OCR
-must fit the configured timeout and the service's CPU/memory limits. Prewarm
+Docling's PDF layout and table analysis are more compute-intensive than plain
+text extraction and may download model artifacts on first use. OCR model
+artifacts are not needed while OCR is disabled. The ingestion worker runs each
+document in a fresh subprocess and enforces `INGESTION_TIMEOUT_SECONDS`
+(default `900`), so first-use downloads and conversion must fit the configured
+timeout and service CPU/memory limits. Prewarm
 Docling model artifacts during deployment and set `DOCLING_ARTIFACTS_PATH` to
-that directory; the path is passed to Docling's PDF pipeline. Without it,
-Docling uses its default model cache. Monitor the `parse_document` stage
-duration and Docling conversion logs. The parser logs byte count, elapsed
-time, page count, extracted character count, and section count, but never
-document text. Use `DOCUMENT_PARSER_PROVIDER=native` only when choosing the
-legacy non-OCR PDF/DOCX parsers intentionally; native PDF parsing rejects
-scanned/image-only files.
+that directory when running offline; a configured path must contain all
+required Docling layout/table artifacts. Otherwise, leave
+`DOCLING_ARTIFACTS_PATH` unset/blank so Docling can use its default cache and
+model download behavior. Monitor the `parse_document` stage duration and
+Docling conversion logs. The parser logs byte count, elapsed time, page count,
+extracted character count, and section count, but never document text. Use
+`DOCUMENT_PARSER_PROVIDER=native` only when choosing the legacy PDF/DOCX
+parsers intentionally; native PDF parsing rejects scanned/image-only files.
 
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the

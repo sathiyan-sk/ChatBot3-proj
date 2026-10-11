@@ -1,5 +1,6 @@
 from io import BytesIO
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 import pymupdf
@@ -19,6 +20,8 @@ from app.infrastructure.providers.parsing.pymupdf_provider import (
 from app.infrastructure.providers.parsing.python_docx_provider import (
     PythonDocxParsingProvider,
 )
+from app.knowledge_engine.contracts.embeddings import EmbeddingsContract
+from app.knowledge_engine.contracts.vector_store import VectorStoreContract
 from app.knowledge_engine.ingestion.parsers.csv_parser import CsvDocumentParser
 from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
     StructuredDocumentParser,
@@ -72,7 +75,7 @@ def test_docling_provider_routes_pdf_and_docx_when_configured():
         assert isinstance(pipeline.parser.parsing_contract, DoclingParsingProvider)
 
 
-def test_docling_enables_pdf_ocr(monkeypatch):
+def test_docling_disables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
     from docling.datamodel.base_models import ConversionStatus, InputFormat
     from docling.document_converter import DocumentConverter
     import pymupdf
@@ -95,7 +98,7 @@ def test_docling_enables_pdf_ocr(monkeypatch):
         return SimpleNamespace(
             status=ConversionStatus.SUCCESS,
             document=SimpleNamespace(
-                export_to_markdown=lambda: "OCR extracted text",
+                export_to_markdown=lambda: "Selectable PDF text",
                 pages={},
             ),
         )
@@ -112,10 +115,10 @@ def test_docling_enables_pdf_ocr(monkeypatch):
     )
 
     options = captured["format_options"][InputFormat.PDF].pipeline_options
-    assert options.do_ocr is True
+    assert options.do_ocr is False
     assert options.artifacts_path == artifacts_path
     assert captured["raises_on_error"] is False
-    assert parsed.content == "OCR extracted text"
+    assert parsed.content == "Selectable PDF text"
 
 
 def test_parser_provider_setting_is_normalized_and_rejected_when_unknown(
@@ -254,6 +257,90 @@ def test_pymupdf_extracts_text_from_pdf_bytes():
 
     assert "Knowledge base PDF fixture" in parsed.content
     assert parsed.metadata["parser"] == "pymupdf"
+
+
+def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
+    from app.knowledge_engine.shared.models import EmbeddedChunk
+
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_textbox(
+        pymupdf.Rect(50, 50, 550, 750),
+        "\n\n".join(
+            f"Support policy section {index}: "
+            + ("Customers can contact support for account assistance. " * 8)
+            for index in range(1, 8)
+        ),
+    )
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="support.pdf",
+        content_bytes=pdf_bytes,
+    )
+    pipeline = _pipeline_for_provider("pdf", "native")
+    monkeypatch.setattr(
+        pipeline.source_loader,
+        "load",
+        lambda _request: source,
+    )
+
+    class FakeEmbeddings(EmbeddingsContract):
+        def embed_query(self, text):
+            return [0.1, 0.2, 0.3]
+
+        def embed_documents(self, texts):
+            assert texts
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeVectorStore:
+        def __init__(self):
+            self.indexed = []
+
+        def index_chunks(self, chunks):
+            self.indexed.extend(chunks)
+
+        def verify_document_version(
+            self,
+            *,
+            document_id,
+            ingestion_version,
+            expected_chunk_ids,
+        ):
+            indexed_ids = {
+                chunk.chunk_id
+                for chunk in self.indexed
+                if chunk.metadata["document_id"] == document_id
+                and int(chunk.metadata["ingestion_version"]) == ingestion_version
+            }
+            return indexed_ids == set(expected_chunk_ids)
+
+    vector_store = FakeVectorStore()
+    pipeline.embedding_generator.embeddings_contract = FakeEmbeddings()
+    pipeline.vector_indexer.vector_store_contract = cast(
+        VectorStoreContract,
+        vector_store,
+    )
+
+    result = pipeline.run(
+        KnowledgeIngestionPipelineRequest(
+            document_id="native-pdf-document",
+            knowledge_base_id="knowledge-base",
+            source_type="pdf",
+            source_path="support.pdf",
+            source_identifier="support.pdf",
+            ingestion_version=1,
+        )
+    )
+
+    assert result.chunk_count > 0
+    assert len(vector_store.indexed) == result.chunk_count
+    assert all(isinstance(chunk, EmbeddedChunk) for chunk in vector_store.indexed)
+    assert all(chunk.embedding == [0.1, 0.2, 0.3] for chunk in vector_store.indexed)
+    assert "Support policy section" in " ".join(
+        chunk.content for chunk in vector_store.indexed
+    )
 
 
 def test_scanned_pdf_without_selectable_text_fails_with_clear_error():

@@ -121,7 +121,7 @@ class DoclingParsingProvider(ParsingContract):
                     os.getenv("DOCLING_ARTIFACTS_PATH", "").strip() or None
                 )
                 pdf_options = PdfPipelineOptions(
-                    do_ocr=True,
+                    do_ocr=False,
                     artifacts_path=artifacts_path,
                     layout_options=LayoutObjectDetectionOptions(
                         engine_options=TransformersObjectDetectionEngineOptions(

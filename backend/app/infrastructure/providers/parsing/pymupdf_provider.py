@@ -43,25 +43,20 @@ class PyMuPDFParsingProvider(ParsingContract):
             )
 
         try:
-            pdf = pymupdf.open(
+            with pymupdf.open(
                 stream=BytesIO(
                     source.content_bytes,
                 ),
                 filetype="pdf",
-            )
-
-            page_text = []
-
-            for page in pdf:
-                text = page.get_text(
-                    "text",
-                    sort=True,
-                )
-
-                if text.strip():
-                    page_text.append(text)
-
-            pdf.close()
+            ) as pdf:
+                page_text: list[str] = []
+                for page in pdf:
+                    text = page.get_text(
+                        "text",
+                        sort=True,
+                    )
+                    if isinstance(text, str) and text.strip():
+                        page_text.append(text)
 
         except Exception as exc:
             raise ApplicationError(
