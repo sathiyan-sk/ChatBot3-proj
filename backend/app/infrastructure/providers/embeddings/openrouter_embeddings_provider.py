@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass
 
@@ -211,9 +212,16 @@ class OpenRouterEmbeddingsProvider(EmbeddingProvider):
                         ),
                         code="embedding_provider_failed",
                         status_code=502,
+                        details={
+                            "upstream_status": upstream_status,
+                            "retryable": retryable,
+                        },
                     ) from exc
 
-                delay_seconds = float(attempt)
+                delay_seconds = random.uniform(
+                    attempt,
+                    min(10.0, 2 ** attempt),
+                )
                 logger.warning(
                     "OpenRouter embeddings request hit %s; retrying in %.0f second(s) (%s/%s)",
                     type(exc).__name__,

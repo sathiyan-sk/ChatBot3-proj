@@ -78,6 +78,7 @@ class ProviderSettings:
     embeddings: str
     vector: str
     storage: str
+    parser: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -113,12 +114,28 @@ class Settings:
     ingestion_stale_after_minutes: int = 15
     document_ingestion_concurrency: int = 1
     ingestion_timeout_seconds: int = 300
+    ingestion_lease_seconds: int = 120
+    ingestion_max_attempts: int = 3
+    ingestion_retry_base_seconds: float = 30.0
+    ingestion_retry_max_seconds: float = 300.0
+    max_upload_file_size_bytes: int = 20 * 1024 * 1024
+    max_pdf_pages: int = 50
     langsmith_tracing: bool = False
     langsmith_api_key: str | None = None
     langsmith_project: str | None = None
     langsmith_endpoint: str | None = None
 
 def load_settings() -> Settings:
+    parser_provider = os.getenv(
+        "DOCUMENT_PARSER_PROVIDER",
+        "docling",
+    ).strip().lower()
+    if parser_provider not in {"docling", "native"}:
+        raise ValueError(
+            "Unsupported DOCUMENT_PARSER_PROVIDER "
+            f"{parser_provider!r}; choose 'docling' or 'native'."
+        )
+
     langsmith_tracing = os.getenv(
         "LANGSMITH_TRACING",
         "false",
@@ -224,6 +241,7 @@ def load_settings() -> Settings:
                 "STORAGE_PROVIDER",
                 "supabase",
             ),
+            parser=parser_provider,
         ),
         storage=StorageSettings(
             supabase_url=os.getenv(
@@ -391,6 +409,30 @@ def load_settings() -> Settings:
         ingestion_timeout_seconds=max(
             30,
             int(os.getenv("INGESTION_TIMEOUT_SECONDS", "900")),
+        ),
+        ingestion_lease_seconds=max(
+            60,
+            int(os.getenv("INGESTION_LEASE_SECONDS", "120")),
+        ),
+        ingestion_max_attempts=max(
+            1,
+            int(os.getenv("INGESTION_MAX_ATTEMPTS", "3")),
+        ),
+        ingestion_retry_base_seconds=max(
+            1.0,
+            float(os.getenv("INGESTION_RETRY_BASE_SECONDS", "30")),
+        ),
+        ingestion_retry_max_seconds=max(
+            1.0,
+            float(os.getenv("INGESTION_RETRY_MAX_SECONDS", "300")),
+        ),
+        max_upload_file_size_bytes=max(
+            1,
+            int(os.getenv("MAX_UPLOAD_FILE_SIZE_BYTES", str(20 * 1024 * 1024))),
+        ),
+        max_pdf_pages=max(
+            1,
+            int(os.getenv("MAX_PDF_PAGES", "50")),
         ),
         langsmith_tracing=langsmith_tracing,
         langsmith_api_key=langsmith_api_key,

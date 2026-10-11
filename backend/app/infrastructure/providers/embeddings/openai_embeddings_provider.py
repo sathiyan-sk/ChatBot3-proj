@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass
 from math import isfinite
@@ -168,10 +169,16 @@ class OpenAIEmbeddingsProvider(EmbeddingProvider):
                         code="openai_embedding_request_failed",
                         status_code=503,
                         details=(
-                            {"upstream_status": status_code}
-                            if status_code is not None
-                            else None
+                            {
+                                "upstream_status": status_code,
+                                "retryable": retryable,
+                            }
                         ),
                     ) from exc
-                time.sleep(float(attempt))
+                time.sleep(
+                    random.uniform(
+                        attempt,
+                        min(10.0, 2 ** attempt),
+                    )
+                )
         raise RuntimeError("OpenAI embeddings retry loop exited unexpectedly.")

@@ -138,7 +138,12 @@ class PgVectorProvider(VectorStoreContract):
               on document.id::text = chunks.document_id
              and document.knowledge_base_id::text = chunks.knowledge_base_id
              and document.ready_version = chunks.ingestion_version
+            join knowledge_bases AS knowledge_base
+              on knowledge_base.id::text = chunks.knowledge_base_id
+             and knowledge_base.id = document.knowledge_base_id
+             and knowledge_base.application_id = document.application_id
             where chunks.knowledge_base_id = cast(:knowledge_base_id as text)
+              and document.status in ('ready', 'processing', 'failed')
             order by chunks.embedding <=> cast(:query_embedding as vector)
             limit :top_k
             """
@@ -184,7 +189,12 @@ class PgVectorProvider(VectorStoreContract):
               on document.id::text = chunks.document_id
              and document.knowledge_base_id::text = chunks.knowledge_base_id
              and document.ready_version = chunks.ingestion_version
+            join knowledge_bases AS knowledge_base
+              on knowledge_base.id::text = chunks.knowledge_base_id
+             and knowledge_base.id = document.knowledge_base_id
+             and knowledge_base.application_id = document.application_id
             where chunks.knowledge_base_id = cast(:knowledge_base_id as text)
+              and document.status in ('ready', 'processing', 'failed')
               and to_tsvector('english', chunks.content) @@ plainto_tsquery('english', :query_text)
             order by score desc
             limit :top_k
@@ -279,6 +289,33 @@ class PgVectorProvider(VectorStoreContract):
             },
         )
         return int(getattr(result, "rowcount", 0) or 0)
+
+    def verify_document_version(
+        self,
+        *,
+        document_id: str,
+        ingestion_version: int,
+        expected_chunk_ids: list[str],
+    ) -> bool:
+        if not expected_chunk_ids:
+            return False
+        table_name = self.settings.vector_store_table_name
+        result = self.session.execute(
+            text(
+                f"""
+                select chunk_id
+                from {table_name}
+                where document_id = cast(:document_id as text)
+                  and ingestion_version = :ingestion_version
+                """
+            ),
+            {
+                "document_id": str(document_id),
+                "ingestion_version": ingestion_version,
+            },
+        )
+        indexed_chunk_ids = {row[0] for row in result.all()}
+        return indexed_chunk_ids == set(expected_chunk_ids)
 
     def _map_row_to_retrieved_chunk(
         self,

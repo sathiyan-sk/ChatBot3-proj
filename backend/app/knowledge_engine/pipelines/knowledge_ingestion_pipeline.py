@@ -95,6 +95,12 @@ class KnowledgeIngestionPipeline:
                 document=normalized_document,
             ),
         )
+        if not chunks:
+            raise ApplicationError(
+                message="Document parsing produced no indexable text chunks.",
+                code="document_chunks_empty",
+                status_code=422,
+            )
 
         enriched_chunks = _run_ingestion_stage(
             "enrich_chunks",

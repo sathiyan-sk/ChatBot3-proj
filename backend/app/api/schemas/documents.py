@@ -52,7 +52,9 @@ class DocumentResponse(BaseModel):
     checksum_sha256: str | None = None
     status: str
     failure_reason: str | None = None
+    failure_code: str | None = None
     ingestion_version: int = 0
     ready_version: int | None = None
+    ingestion_attempt_count: int = 0
     created_at: datetime
     updated_at: datetime

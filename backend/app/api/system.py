@@ -20,7 +20,7 @@ def get_system_config(request: Request) -> dict[str, str]:
         "provider_embeddings": settings.providers.embeddings,
         "provider_vector": settings.providers.vector,
         "provider_storage": settings.providers.storage,
-        "provider_parsing": "pymupdf,python-docx",
+        "provider_parsing": settings.providers.parser,
         "ollama_chat_model": settings.ollama.llm_model_name,
         "ollama_embed_model": settings.ollama.embedding_model_name,
         "vector_store_table_name": settings.vector_store_table_name,

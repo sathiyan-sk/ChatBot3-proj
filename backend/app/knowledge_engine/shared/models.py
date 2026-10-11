@@ -15,11 +15,19 @@ class RawSource:
 
 
 @dataclass(slots=True, frozen=True)
+class DocumentSection:
+    heading: str
+    content: str
+    level: int = 1
+
+
+@dataclass(slots=True, frozen=True)
 class ParsedDocument:
     title: str
     content: str
     sections: list[str]
     metadata: dict[str, str] = field(default_factory=dict)
+    structured_sections: list[DocumentSection] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,6 +36,7 @@ class NormalizedDocument:
     content: str
     sections: list[str]
     metadata: dict[str, str] = field(default_factory=dict)
+    structured_sections: list[DocumentSection] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

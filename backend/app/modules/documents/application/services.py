@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 from typing import ClassVar
@@ -32,6 +33,8 @@ from app.modules.documents.domain.value_objects import (
 from app.modules.knowledge_bases.domain.repository_interfaces import (
     KnowledgeBaseRepositoryInterface,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -97,6 +100,7 @@ class DocumentApplicationService:
         filename: str,
         content_type: str | None,
         content: bytes,
+        document_id: UUID | None = None,
     ) -> DocumentDto:
         knowledge_base = (
             self.knowledge_base_repository.get_by_id(
@@ -118,7 +122,7 @@ class DocumentApplicationService:
                 status_code=500,
             )
 
-        document_id = uuid4()
+        document_id = document_id or uuid4()
         storage_path = (
             f"{knowledge_base_id}/{document_id}/{filename}"
         )
@@ -126,29 +130,49 @@ class DocumentApplicationService:
             content,
         ).hexdigest()
 
-        uploaded_path = self._upload_to_storage(
-            path=storage_path,
-            content=content,
-            content_type=content_type,
-        )
+        try:
+            uploaded_path = self._upload_to_storage(
+                path=storage_path,
+                content=content,
+                content_type=content_type,
+            )
 
-        created = self.document_repository.create(
-            id=document_id,
-            application_id=knowledge_base.application_id,
-            knowledge_base_id=knowledge_base.id,
-            title=DocumentTitle(title).value,
-            description=description,
-            source_type="file",
-            source_uri=None,
-            storage_path=uploaded_path,
-            mime_type=content_type,
-            file_size_bytes=len(content),
-            checksum_sha256=checksum_sha256,
-            status="pending",
-            failure_reason=None,
-        )
+            created = self.document_repository.create(
+                id=document_id,
+                application_id=knowledge_base.application_id,
+                knowledge_base_id=knowledge_base.id,
+                title=DocumentTitle(title).value,
+                description=description,
+                source_type="file",
+                source_uri=None,
+                storage_path=uploaded_path,
+                mime_type=content_type,
+                file_size_bytes=len(content),
+                checksum_sha256=checksum_sha256,
+                status="pending",
+                failure_reason=None,
+            )
+        except Exception:
+            self.cleanup_uploaded_source(storage_path)
+            raise
 
         return self._to_dto(created)
+
+    def cleanup_uploaded_source(self, storage_path: str) -> None:
+        delete = getattr(self.storage_provider, "delete", None)
+        if not callable(delete):
+            logger.error(
+                "Uploaded object may be orphaned because storage has no delete operation",
+                extra={"storage_path": storage_path},
+            )
+            return
+        try:
+            delete(storage_path)
+        except Exception:
+            logger.exception(
+                "Could not remove uploaded object after database failure",
+                extra={"storage_path": storage_path},
+            )
 
     def get_by_id(
         self,
@@ -446,8 +470,10 @@ class DocumentApplicationService:
             checksum_sha256=document.checksum_sha256,
             status=document.status,
             failure_reason=document.failure_reason,
+            failure_code=document.failure_code,
             ingestion_version=document.ingestion_version,
             ready_version=document.ready_version,
+            ingestion_attempt_count=document.ingestion_attempt_count,
             created_at=document.created_at,
             updated_at=document.updated_at,
         )

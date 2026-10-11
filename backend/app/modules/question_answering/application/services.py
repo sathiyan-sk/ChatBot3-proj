@@ -46,11 +46,12 @@ class ChatApplicationService:
             )
 
         ready_documents = [
-            item 
+            item
             for item in self.document_repository.list_by_knowledge_base_id(
-            knowledge_base_id=knowledge_base.id
+                knowledge_base_id=knowledge_base.id
             )
-            if item.status == "ready"
+            if item.ready_version is not None
+            and item.status in {"ready", "processing", "failed"}
         ]
         if not ready_documents:
             raise ApplicationError(

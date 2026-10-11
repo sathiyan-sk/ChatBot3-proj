@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +39,7 @@ class DocumentModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
     checksum_sha256: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", server_default="pending")
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ingestion_version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -45,6 +47,20 @@ class DocumentModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
         server_default="0",
     )
     ready_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ingestion_attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    ingestion_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    ingestion_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     application = relationship("ApplicationModel", back_populates="documents")
     knowledge_base = relationship("KnowledgeBaseModel", back_populates="documents")

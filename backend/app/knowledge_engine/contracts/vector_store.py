@@ -34,6 +34,15 @@ class VectorStoreContract(ABC):
     ) -> int:
         raise NotImplementedError
 
+    def verify_document_version(
+        self,
+        *,
+        document_id: str,
+        ingestion_version: int,
+        expected_chunk_ids: list[str],
+    ) -> bool:
+        raise NotImplementedError
+
     @abstractmethod
     def similarity_search(
         self,

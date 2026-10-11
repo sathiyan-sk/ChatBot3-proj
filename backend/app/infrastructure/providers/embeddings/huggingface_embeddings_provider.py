@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from math import isfinite
 
+import requests
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
@@ -87,10 +88,24 @@ class HuggingFaceEmbeddingsProvider(EmbeddingProvider):
                     code="huggingface_embedding_request_failed",
                     status_code=503,
                     details=(
-                        {"upstream_status": status_code}
-                        if status_code is not None
-                        else None
+                        {
+                            "upstream_status": status_code,
+                            "retryable": (
+                                status_code == 429
+                                or (
+                                    status_code is not None
+                                    and status_code >= 500
+                                )
+                            ),
+                        }
                     ),
+                ) from exc
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                raise ApplicationError(
+                    message="Hugging Face embedding request timed out or lost its connection.",
+                    code="huggingface_embedding_request_failed",
+                    status_code=503,
+                    details={"retryable": True},
                 ) from exc
 
             raw_vectors = response.tolist()

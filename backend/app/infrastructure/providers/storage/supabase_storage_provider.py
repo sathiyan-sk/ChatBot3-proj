@@ -191,6 +191,30 @@ class SupabaseStorageProvider(StorageContract):
 
         return response.content
 
+    def delete(self, storage_path: str) -> None:
+        normalized_path = self._normalize_path(storage_path)
+        try:
+            response = httpx.delete(
+                self._object_url(normalized_path),
+                headers=self._headers(),
+                timeout=self.settings.provider_timeout_seconds,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return
+            raise ApplicationError(
+                message="Uploaded file cleanup failed.",
+                code="storage_delete_failed",
+                status_code=502,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ApplicationError(
+                message="Uploaded file cleanup failed.",
+                code="storage_delete_failed",
+                status_code=502,
+            ) from exc
+
     def download_text(
         self,
         storage_path: str,

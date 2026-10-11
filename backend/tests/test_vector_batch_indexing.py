@@ -19,11 +19,14 @@ class _Session:
 
 
 class _ExecutionResult:
+    def __init__(self, rows=None):
+        self.rows = rows or []
+
     def mappings(self):
         return self
 
     def all(self):
-        return []
+        return self.rows
 
 
 def test_pgvector_provider_indexes_many_chunks_with_one_executemany_call():
@@ -116,6 +119,40 @@ def test_retrieval_searches_only_the_published_document_version():
     for statement, _ in session.executions:
         assert "join documents as document" in statement.lower()
         assert "document.ready_version = chunks.ingestion_version" in statement.lower()
+        assert "join knowledge_bases as knowledge_base" in statement.lower()
+        assert (
+            "knowledge_base.application_id = document.application_id"
+            in statement.lower()
+        )
+        assert (
+            "document.status in ('ready', 'processing', 'failed')"
+            in statement.lower()
+        )
+
+
+def test_version_verification_requires_exact_indexed_chunk_set():
+    session = _Session()
+    session.result = _ExecutionResult(
+        [("chunk-1",), ("chunk-2",)]
+    )
+    provider = PgVectorProvider(
+        settings=cast(
+            Settings,
+            SimpleNamespace(vector_store_table_name="document_chunks"),
+        ),
+        session=cast(Session, session),
+    )
+
+    assert provider.verify_document_version(
+        document_id="document-1",
+        ingestion_version=4,
+        expected_chunk_ids=["chunk-1", "chunk-2"],
+    )
+    assert not provider.verify_document_version(
+        document_id="document-1",
+        ingestion_version=4,
+        expected_chunk_ids=["chunk-1"],
+    )
 
 
 def test_obsolete_version_cleanup_is_scoped_to_one_document():

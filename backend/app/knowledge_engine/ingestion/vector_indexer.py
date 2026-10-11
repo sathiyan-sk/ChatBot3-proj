@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from app.knowledge_engine.contracts.vector_store import VectorStoreContract
+from app.core.exceptions import ApplicationError
 from app.knowledge_engine.shared.models import EmbeddedChunk
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,25 @@ class VectorIndexer:
                     document_id=document_id,
                     ingestion_version=int(ingestion_version),
                     keep_chunk_ids=indexed_chunk_ids,
+                )
+            if not document_id or not ingestion_version:
+                raise ApplicationError(
+                    message="Indexed document version metadata is incomplete.",
+                    code="vector_index_version_invalid",
+                    status_code=422,
+                )
+            if not self.vector_store_contract.verify_document_version(
+                document_id=document_id,
+                ingestion_version=int(ingestion_version),
+                expected_chunk_ids=indexed_chunk_ids,
+            ):
+                raise ApplicationError(
+                    message=(
+                        "Indexed vector records do not match the expected "
+                        "document chunks."
+                    ),
+                    code="vector_index_verification_failed",
+                    status_code=503,
                 )
 
         return indexed_chunk_ids

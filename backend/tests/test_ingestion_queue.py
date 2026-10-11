@@ -173,9 +173,21 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
 
     calls = {}
 
-    def fake_fail_mark(session_factory, document_id, reason, settings):
+    def fake_fail_mark(
+        session_factory,
+        document_id,
+        reason,
+        ingestion_version,
+        *,
+        failure_code,
+    ):
         _ = session_factory
-        calls["failed"] = (document_id, str(reason), settings)
+        calls["failed"] = (
+            document_id,
+            str(reason),
+            ingestion_version,
+            failure_code,
+        )
 
     def fake_get_context(*args, **kwargs):
         _ = (args, kwargs)
@@ -188,6 +200,10 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
     monkeypatch.setattr(
         "app.api.admin.ingestion._mark_document_failed_and_log",
         fake_fail_mark,
+    )
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.touch_document_ingestion_heartbeat",
+        lambda *_args, **_kwargs: True,
     )
 
     settings = cast(Settings, SimpleNamespace(ingestion_timeout_seconds=5))
@@ -202,8 +218,9 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
         _execute_document_ingestion_with_timeout(
             "test-doc-id",
             app,
-            timeout_seconds=5,
+            timeout_seconds=0.01,
             ingestion_version=1,
+            heartbeat_interval_seconds=0.01,
         )
     except TimeoutError:
         pass
@@ -212,7 +229,77 @@ def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):
     assert fake_process.terminated is True
     assert calls["failed"][0] == "test-doc-id"
     assert "timed out" in calls["failed"][1].lower()
-    assert calls["failed"][2] == 1
+    assert calls["failed"][2:] == (1, "ingestion_timeout")
+
+
+def test_heartbeat_database_error_terminates_subprocess_for_recovery(
+    monkeypatch,
+):
+    class FakeProcess:
+        def __init__(self):
+            self.started = False
+            self.terminated = False
+            self.alive = True
+
+        def start(self):
+            self.started = True
+
+        def join(self, timeout=None):
+            _ = timeout
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.terminated = True
+            self.alive = False
+
+    class FakeQueue:
+        def get(self, timeout=None):
+            _ = timeout
+            raise AssertionError("The terminated child cannot report success.")
+
+    fake_process = FakeProcess()
+
+    class FakeContext:
+        def Process(self, *args, **kwargs):
+            _ = (args, kwargs)
+            return fake_process
+
+        def Queue(self):
+            return FakeQueue()
+
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.multiprocessing.get_context",
+        lambda *_args, **_kwargs: FakeContext(),
+    )
+
+    def fail_heartbeat(*_args, **_kwargs):
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(
+        "app.api.admin.ingestion.touch_document_ingestion_heartbeat",
+        fail_heartbeat,
+    )
+    settings = cast(Settings, SimpleNamespace(ingestion_timeout_seconds=5))
+    app = _IngestionApplication(
+        state=_IngestionAppState(
+            settings=settings,
+            session_factory=lambda: cast(Session, _AdvisoryLockSession()),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="lease could not be renewed"):
+        _execute_document_ingestion_with_timeout(
+            "test-doc-id",
+            app,
+            timeout_seconds=5,
+            ingestion_version=1,
+            heartbeat_interval_seconds=0.01,
+        )
+
+    assert fake_process.started
+    assert fake_process.terminated
 
 
 def test_duplicate_execution_skips_subprocess_when_advisory_lock_is_held(

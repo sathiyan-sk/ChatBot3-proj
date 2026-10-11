@@ -84,6 +84,11 @@ ALLOWED_ORIGINS=https://chatbot3-proj-1.onrender.com
 CORS_ALLOW_LOCAL_ORIGINS=false
 INGESTION_STALE_AFTER_MINUTES=15
 DOCUMENT_INGESTION_CONCURRENCY=1
+INGESTION_TIMEOUT_SECONDS=900
+INGESTION_LEASE_SECONDS=120
+INGESTION_MAX_ATTEMPTS=3
+MAX_UPLOAD_FILE_SIZE_BYTES=20971520
+MAX_PDF_PAGES=50
 ```
 
 `FRONTEND_URL` is automatically merged into the backend global CORS allow-list,
@@ -102,22 +107,75 @@ start with the FastAPI ASGI lifespan and claim jobs from PostgreSQL using
 `FOR UPDATE SKIP LOCKED`; keep ASGI lifespan enabled in the Render start
 command. `DOCUMENT_INGESTION_CONCURRENCY` controls the worker count per service
 instance and defaults to `1`. Active jobs heartbeat while parsing, embedding,
-and indexing. Jobs without a heartbeat for `INGESTION_STALE_AFTER_MINUTES`
-(default `15`) are eligible for automatic worker reclamation. Check
+and indexing. A renewable database lease (`INGESTION_LEASE_SECONDS`, default
+`120`; heartbeat every 30 seconds) governs ownership. Jobs with expired leases
+are eligible for automatic worker reclamation. Attempts are bounded by
+`INGESTION_MAX_ATTEMPTS` (default `3`); only provider failures explicitly
+classified as transient are retried, using capped exponential backoff with
+jitter (`INGESTION_RETRY_BASE_SECONDS=30`,
+`INGESTION_RETRY_MAX_SECONDS=300`). Billing failures such as HTTP 402 are not
+automatically retried. Timeouts and permanent failures remain failed until an
+admin explicitly retries them. Check
 `/api/system/ingestion-workers` for worker health and Render logs for
-document-scoped ingestion stage progress.
+document-scoped ingestion stage progress. Apply
+`0004_ingestion_leases` before deployment.
+
+PDF uploads are bounded by `MAX_UPLOAD_FILE_SIZE_BYTES` (default 20 MiB) and
+`MAX_PDF_PAGES` (default 50); the page limit is checked before the object is
+stored and again before Docling conversion. Docling OCR/layout/table processing
+can be CPU- and memory-intensive. `INGESTION_TIMEOUT_SECONDS` defaults to 900;
+choose values that leave headroom for model initialization and processing.
+Keep concurrency at one until representative Render CPU/memory and OCR
+measurements justify increasing it. The subprocess-per-document design is
+retained to isolate jobs; it repeats model startup and no persistent-worker
+performance gain is assumed.
+
+PDF and DOCX parsing is selected independently with
+`DOCUMENT_PARSER_PROVIDER=docling` (the default) or `native`. Docling processes
+PDF/DOCX uploads directly and conversion errors fail that ingestion attempt;
+the application does not silently retry with another parser. For PDFs, OCR is
+enabled so scanned pages can be read as well as selectable text. No minimum
+section count or selectable-text precheck is applied. If conversion still
+produces no indexable text, ingestion fails explicitly rather than publishing a
+ready document with zero vectors. Docling exports heading-aware sections and
+tables as Markdown; section headings are carried into generated chunks. Text,
+Markdown, JSON, CSV, website, and image sources keep their dedicated parsers.
+
+Docling's PDF layout, OCR, and table analysis are more compute-intensive than
+plain text extraction and may download model artifacts on first use. The
+ingestion worker runs each document in a fresh subprocess and enforces
+`INGESTION_TIMEOUT_SECONDS` (default `900`), so first-use downloads and OCR
+must fit the configured timeout and the service's CPU/memory limits. Prewarm
+Docling model artifacts during deployment and set `DOCLING_ARTIFACTS_PATH` to
+that directory; the path is passed to Docling's PDF pipeline. Without it,
+Docling uses its default model cache. Monitor the `parse_document` stage
+duration and Docling conversion logs. The parser logs byte count, elapsed
+time, page count, extracted character count, and section count, but never
+document text. Use `DOCUMENT_PARSER_PROVIDER=native` only when choosing the
+legacy non-OCR PDF/DOCX parsers intentionally; native PDF parsing rejects
+scanned/image-only files.
 
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the
 service-role key; do not expose source files through public object URLs. Each
 job increments `documents.ingestion_version`. Successful vector writes,
 `ready_version`, and the document's `ready` status publish in one PostgreSQL
-transaction. Each vector row carries that version, and retrieval only returns
-the version referenced by `ready_version`. Failed or superseded attempts do
-not replace the last published version, so a previously indexed version
-remains searchable while a retry is pending or fails. Apply migrations
-`0002_document_ingestion_versions` and `0003_version_document_chunks` before
-deploying this version of the backend. For databases managed with
+transaction. The pipeline verifies the exact indexed chunk set before
+publication. Each vector row carries its immutable per-document
+`ingestion_version`; semantic and keyword retrieval only return the active
+`ready_version` and require the document and knowledge base to belong to the
+same application. Failed or superseded attempts do not replace the last
+published version, so a previously indexed version remains searchable while a
+replacement is processing or has failed. Archived documents are excluded.
+Apply migrations `0002_document_ingestion_versions`,
+`0003_version_document_chunks`, `0004_ingestion_leases`, and
+`0005_storage_upload_intents` before deploying this version of the backend.
+Uploads first commit a durable storage intent and remove it atomically with the
+document row after successful upload. The lifespan recovery task checks stale
+intents every minute; intents older than 30 minutes with no matching document
+are deleted from Supabase Storage. The delete operation is idempotent for
+already-missing objects, so crashes between deletion and database commit are
+safe to retry. For databases managed with
 `supabase_schema_fix.sql`, apply that script as well; it switches the default
 `data_files` bucket to private. If `SUPABASE_BUCKET_NAME` is customized, make
 that bucket private in Supabase Storage settings.

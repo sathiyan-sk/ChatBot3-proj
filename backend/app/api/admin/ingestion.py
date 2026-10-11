@@ -5,7 +5,9 @@ import logging
 import multiprocessing
 import os
 import queue as queue_module
+import random
 import socket
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
@@ -43,6 +45,7 @@ from app.modules.documents.application.queries import (
     GetDocumentByIdQuery,
 )
 from app.config.settings import Settings
+from app.core.exceptions import ApplicationError
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +280,8 @@ def claim_next_pending_document(
     stale_after_minutes: int = 120,
     *,
     worker_id: int | None = None,
+    lease_seconds: int = 120,
+    max_attempts: int = 3,
 ) -> tuple[str, int] | None:
     session: Session = session_factory()
     try:
@@ -286,10 +291,22 @@ def claim_next_pending_document(
             select(DocumentModel)
             .where(
                 or_(
-                    DocumentModel.status == "pending",
+                    and_(
+                        DocumentModel.status == "pending",
+                        or_(
+                            DocumentModel.ingestion_next_attempt_at.is_(None),
+                            DocumentModel.ingestion_next_attempt_at <= now,
+                        ),
+                    ),
                     and_(
                         DocumentModel.status == "processing",
-                        DocumentModel.updated_at < stale_before,
+                        or_(
+                            DocumentModel.ingestion_lease_expires_at <= now,
+                            and_(
+                                DocumentModel.ingestion_lease_expires_at.is_(None),
+                                DocumentModel.updated_at < stale_before,
+                            ),
+                        ),
                     ),
                 )
             )
@@ -302,11 +319,37 @@ def claim_next_pending_document(
 
         was_stale = document.status == "processing"
         queued_at = document.updated_at
+        attempt_count = getattr(document, "ingestion_attempt_count", 0)
+        if attempt_count >= max_attempts:
+            document.status = "failed"
+            document.failure_code = "ingestion_retry_exhausted"
+            document.failure_reason = (
+                f"Document ingestion reached the maximum of {max_attempts} attempts."
+            )
+            document.ingestion_lease_expires_at = None
+            document.ingestion_next_attempt_at = None
+            document.updated_at = now
+            session.commit()
+            logger.error(
+                "Document ingestion moved to terminal failure after retry limit",
+                extra={
+                    "document_id": str(document.id),
+                    "attempt_count": attempt_count,
+                },
+            )
+            return None
+
         document.ingestion_version += 1
+        document.ingestion_attempt_count = attempt_count + 1
         document.status = "processing"
+        document.failure_code = None
         document.failure_reason = None
         claimed_at = datetime.now(timezone.utc)
         document.updated_at = claimed_at
+        document.ingestion_next_attempt_at = None
+        document.ingestion_lease_expires_at = claimed_at + timedelta(
+            seconds=max(60, lease_seconds)
+        )
         document_id = str(document.id)
         ingestion_version = document.ingestion_version
         session.commit()
@@ -317,6 +360,7 @@ def claim_next_pending_document(
             extra={
                 "document_id": document_id,
                 "ingestion_version": ingestion_version,
+                "attempt_count": document.ingestion_attempt_count,
                 "reclaimed_stale_job": was_stale,
                 "queue_wait_seconds": max(
                     0,
@@ -343,6 +387,7 @@ async def run_document_ingestion_worker(
     stale_after_minutes: int = 120,
     poll_interval_seconds: float = 2.0,
     ingestion_timeout_seconds: int | None = None,
+    lease_seconds: int = 120,
 ) -> None:
     logger.info("Document ingestion worker started", extra={"worker_id": worker_id})
     while True:
@@ -352,6 +397,12 @@ async def run_document_ingestion_worker(
                 session_factory,
                 stale_after_minutes,
                 worker_id=worker_id,
+                lease_seconds=lease_seconds,
+                max_attempts=getattr(
+                    application.state.settings,
+                    "ingestion_max_attempts",
+                    3,
+                ),
             )
             if claimed_job is None:
                 await asyncio.sleep(poll_interval_seconds)
@@ -364,35 +415,14 @@ async def run_document_ingestion_worker(
                 else getattr(application.state.settings, "ingestion_timeout_seconds", 300)
             )
 
-            task = asyncio.create_task(
-                asyncio.to_thread(
-                    _execute_document_ingestion_with_timeout,
-                    document_id,
-                    application,
-                    timeout_seconds=timeout_value,
-                    ingestion_version=ingestion_version,
-                )
+            await asyncio.to_thread(
+                _execute_document_ingestion_with_timeout,
+                document_id,
+                application,
+                timeout_seconds=timeout_value,
+                ingestion_version=ingestion_version,
+                lease_seconds=lease_seconds,
             )
-            while not task.done():
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(task),
-                        timeout=30,
-                    )
-                except asyncio.TimeoutError:
-                    try:
-                        await asyncio.to_thread(
-                            touch_document_ingestion_heartbeat,
-                            session_factory,
-                            document_id,
-                            ingestion_version,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Could not update document ingestion heartbeat",
-                            extra={"document_id": document_id},
-                        )
-            await task
         except asyncio.CancelledError:
             logger.info(
                 "Document ingestion worker stopped",
@@ -411,19 +441,28 @@ def touch_document_ingestion_heartbeat(
     session_factory,
     document_id: str,
     ingestion_version: int,
-) -> None:
+    *,
+    lease_seconds: int = 120,
+) -> bool:
     session: Session = session_factory()
     try:
-        session.execute(
+        now = datetime.now(timezone.utc)
+        result = session.execute(
             update(DocumentModel)
             .where(
                 DocumentModel.id == UUID(document_id),
                 DocumentModel.status == "processing",
                 DocumentModel.ingestion_version == ingestion_version,
+                DocumentModel.ingestion_lease_expires_at > now,
             )
-            .values(updated_at=datetime.now(timezone.utc))
+            .values(
+                updated_at=now,
+                ingestion_lease_expires_at=now
+                + timedelta(seconds=max(60, lease_seconds)),
+            )
         )
         session.commit()
+        return result.rowcount == 1
     except Exception:
         session.rollback()
         raise
@@ -436,6 +475,8 @@ def _mark_document_failed_and_log(
     document_id: str,
     reason: str,
     ingestion_version: int,
+    *,
+    failure_code: str = "ingestion_failed",
 ) -> None:
     session: Session | None = None
     try:
@@ -447,10 +488,15 @@ def _mark_document_failed_and_log(
                 DocumentModel.id == UUID(document_id),
                 DocumentModel.ingestion_version == ingestion_version,
                 DocumentModel.status == "processing",
+                DocumentModel.ingestion_lease_expires_at
+                > datetime.now(timezone.utc),
             )
             .values(
                 status="failed",
+                failure_code=failure_code,
                 failure_reason=reason,
+                ingestion_lease_expires_at=None,
+                ingestion_next_attempt_at=None,
                 updated_at=datetime.now(timezone.utc),
             )
         )
@@ -528,12 +574,130 @@ def _run_document_ingestion_task_in_subprocess(
                 bind.dispose()
 
 
+def _retry_delay_seconds(attempt_count: int, settings: Settings) -> float:
+    ceiling = max(1.0, settings.ingestion_retry_max_seconds)
+    base = max(1.0, settings.ingestion_retry_base_seconds)
+    exponential_delay = min(ceiling, base * (2 ** max(0, attempt_count - 1)))
+    return random.uniform(exponential_delay * 0.75, exponential_delay)
+
+
+def _is_retryable_ingestion_error(error: Exception) -> bool:
+    if not isinstance(error, ApplicationError) or not error.details:
+        return False
+    return error.details.get("retryable") is True
+
+
+def _terminate_ingestion_process(process) -> None:
+    if not process.is_alive():
+        return
+    process.terminate()
+    process.join(5)
+    if process.is_alive():
+        process.kill()
+        process.join(5)
+
+
+def _record_ingestion_failure(
+    session_factory: Callable[[], Session],
+    document_id: str,
+    error: Exception,
+    ingestion_version: int,
+    settings: Settings,
+) -> None:
+    session = session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        document = session.execute(
+            select(DocumentModel).where(
+                DocumentModel.id == UUID(document_id),
+                DocumentModel.ingestion_version == ingestion_version,
+                DocumentModel.status == "processing",
+                DocumentModel.ingestion_lease_expires_at > now,
+            )
+        ).scalar_one_or_none()
+        if document is None:
+            session.rollback()
+            logger.warning(
+                "Failure update skipped because ingestion lease was lost",
+                extra={
+                    "document_id": document_id,
+                    "ingestion_version": ingestion_version,
+                },
+            )
+            return
+
+        max_attempts = max(1, settings.ingestion_max_attempts)
+        retry = (
+            _is_retryable_ingestion_error(error)
+            and document.ingestion_attempt_count < max_attempts
+        )
+        failure_code = getattr(error, "code", "ingestion_failed")
+        values: dict[str, object] = {
+            "status": "pending" if retry else "failed",
+            "failure_code": failure_code,
+            "failure_reason": str(error),
+            "ingestion_lease_expires_at": None,
+            "updated_at": now,
+            "ingestion_next_attempt_at": (
+                now
+                + timedelta(
+                    seconds=_retry_delay_seconds(
+                        document.ingestion_attempt_count,
+                        settings,
+                    )
+                )
+                if retry
+                else None
+            ),
+        }
+        result = session.execute(
+            update(DocumentModel)
+            .where(
+                DocumentModel.id == UUID(document_id),
+                DocumentModel.ingestion_version == ingestion_version,
+                DocumentModel.status == "processing",
+                DocumentModel.ingestion_lease_expires_at > now,
+            )
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            session.rollback()
+            logger.warning(
+                "Failure update skipped because ingestion lease was lost",
+                extra={
+                    "document_id": document_id,
+                    "ingestion_version": ingestion_version,
+                },
+            )
+            return
+        session.commit()
+        logger.log(
+            logging.WARNING if retry else logging.ERROR,
+            "Document ingestion attempt %s",
+            "scheduled for retry" if retry else "failed permanently",
+            extra={
+                "document_id": document_id,
+                "ingestion_version": ingestion_version,
+                "failure_code": failure_code,
+                "attempt_count": document.ingestion_attempt_count,
+                "next_attempt_at": values["ingestion_next_attempt_at"],
+            },
+        )
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def _execute_document_ingestion_with_timeout(
     document_id: str,
     application: IngestionApplication,
     *,
     timeout_seconds: int,
     ingestion_version: int,
+    lease_seconds: int = 120,
+    heartbeat_interval_seconds: int = 30,
 ) -> None:
     if timeout_seconds <= 0:
         timeout_seconds = 300
@@ -574,7 +738,46 @@ def _execute_document_ingestion_with_timeout(
             args=(document_id, queue, ingestion_version),
         )
         process.start()
-        process.join(timeout=timeout_seconds)
+        deadline = time.monotonic() + timeout_seconds
+        while process.is_alive():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            process.join(timeout=min(heartbeat_interval_seconds, remaining))
+            if not process.is_alive():
+                break
+            try:
+                renewed = touch_document_ingestion_heartbeat(
+                    session_factory,
+                    document_id,
+                    ingestion_version,
+                    lease_seconds=lease_seconds,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Could not renew document ingestion lease; terminating worker process",
+                    extra={
+                        "document_id": document_id,
+                        "ingestion_version": ingestion_version,
+                    },
+                )
+                _terminate_ingestion_process(process)
+                raise RuntimeError(
+                    "Document ingestion lease could not be renewed; "
+                    "the attempt will be recovered after lease expiry."
+                ) from exc
+            if not renewed:
+                logger.warning(
+                    "Terminating document ingestion after lease ownership was lost",
+                    extra={
+                        "document_id": document_id,
+                        "ingestion_version": ingestion_version,
+                    },
+                )
+                _terminate_ingestion_process(process)
+                raise RuntimeError(
+                    "Document ingestion lease expired or was superseded."
+                )
 
         if process.is_alive():
             logger.warning(
@@ -584,13 +787,13 @@ def _execute_document_ingestion_with_timeout(
                     "timeout_seconds": timeout_seconds,
                 },
             )
-            process.terminate()
-            process.join(5)
+            _terminate_ingestion_process(process)
             _mark_document_failed_and_log(
                 session_factory,
                 document_id,
                 f"Document ingestion timed out after {timeout_seconds} seconds.",
                 ingestion_version,
+                failure_code="ingestion_timeout",
             )
             raise TimeoutError(
                 f"Document ingestion timed out after {timeout_seconds} seconds."
@@ -604,12 +807,6 @@ def _execute_document_ingestion_with_timeout(
                     "Document ingestion process exited unexpectedly with code "
                     f"{process.exitcode}."
                 )
-                _mark_document_failed_and_log(
-                    session_factory,
-                    document_id,
-                    reason,
-                    ingestion_version,
-                )
                 raise RuntimeError(reason) from exc
             logger.exception(
                 "Document ingestion subprocess exited without reporting a result",
@@ -620,24 +817,11 @@ def _execute_document_ingestion_with_timeout(
             ) from exc
         if result_status == "error":
             reason = payload or "document ingestion failed"
-            if process.exitcode not in (0, None):
-                _mark_document_failed_and_log(
-                    session_factory,
-                    document_id,
-                    reason,
-                    ingestion_version,
-                )
             raise RuntimeError(reason)
         if process.exitcode not in (0, None):
             reason = (
                 "Document ingestion process exited unexpectedly with code "
                 f"{process.exitcode}."
-            )
-            _mark_document_failed_and_log(
-                session_factory,
-                document_id,
-                reason,
-                ingestion_version,
             )
             raise RuntimeError(reason)
         if result_status != "success":
@@ -749,11 +933,16 @@ def run_document_ingestion_task(
                 DocumentModel.id == UUID(document_id),
                 DocumentModel.status == "processing",
                 DocumentModel.ingestion_version == ingestion_version,
+                DocumentModel.ingestion_lease_expires_at
+                > datetime.now(timezone.utc),
             )
             .values(
                 status="ready",
                 ready_version=ingestion_version,
+                failure_code=None,
                 failure_reason=None,
+                ingestion_lease_expires_at=None,
+                ingestion_next_attempt_at=None,
                 updated_at=datetime.now(timezone.utc),
             )
         )
@@ -802,30 +991,16 @@ def run_document_ingestion_task(
             active_failure_session = session_factory()
             failure_session = active_failure_session
             if ingestion_version is not None:
-                failure_result = active_failure_session.execute(
-                    update(DocumentModel)
-                    .where(
-                        DocumentModel.id == UUID(document_id),
-                        DocumentModel.ingestion_version == ingestion_version,
-                        DocumentModel.status == "processing",
-                    )
-                    .values(
-                        status="failed",
-                        failure_reason=str(exc),
-                        updated_at=datetime.now(timezone.utc),
-                    )
+                _safe_rollback(active_failure_session)
+                active_failure_session.close()
+                failure_session = None
+                _record_ingestion_failure(
+                    session_factory,
+                    document_id,
+                    exc,
+                    ingestion_version,
+                    application.state.settings,
                 )
-                if failure_result.rowcount:
-                    active_failure_session.commit()
-                else:
-                    active_failure_session.rollback()
-                    logger.warning(
-                        "Skipped failure update because this attempt is no longer processing",
-                        extra={
-                            "document_id": document_id,
-                            "ingestion_version": ingestion_version,
-                        },
-                    )
             else:
                 failed_document_service = build_document_application_service(
                     settings=application.state.settings,
@@ -941,6 +1116,10 @@ def start_ingestion(
                     },
                 )
         document_service.mark_pending(payload.document_id)
+        document_row.ingestion_attempt_count = 0
+        document_row.ingestion_next_attempt_at = None
+        document_row.ingestion_lease_expires_at = None
+        document_row.failure_code = None
         session.commit()
     except HTTPException:
         _safe_rollback(session)

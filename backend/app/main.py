@@ -9,6 +9,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin.ingestion import run_document_ingestion_worker
+from app.api.admin.storage_upload_recovery import (
+    cleanup_stale_storage_upload_intents,
+)
 from app.api.dependencies import get_knowledge_ingestion_pipeline
 from app.api.dynamic_cors import register_dynamic_cors_middleware
 from app.api.error_handlers import register_exception_handlers
@@ -18,6 +21,9 @@ from app.composition import build_application_container
 from app.config.security import load_security_settings
 from app.config.settings import get_settings
 from app.infrastructure.db.session import create_session_factory
+from app.infrastructure.providers.storage.supabase_storage_provider import (
+    SupabaseStorageProvider,
+)
 from app.infrastructure.observability.metrics import InMemoryMetricsRegistry
 from app.infrastructure.observability.tracing import create_trace_observer
 from app.modules.conversations.infrastructure.repositories import (
@@ -64,6 +70,21 @@ async def _run_retention_cleanup(session_factory, default_retention_days: int) -
             logger.exception("Scheduled conversation-retention cleanup failed")
 
 
+async def _run_storage_upload_recovery(session_factory, storage_settings) -> None:
+    storage_provider = SupabaseStorageProvider(settings=storage_settings)
+    while True:
+        try:
+            await asyncio.to_thread(
+                cleanup_stale_storage_upload_intents,
+                session_factory,
+                storage_provider,
+                stale_after_minutes=30,
+            )
+        except Exception:
+            logger.exception("Scheduled storage upload recovery failed")
+        await asyncio.sleep(60)
+
+
 def create_lifespan(settings, session_factory):
     """Factory for lifespan context manager with dependency injection."""
     @asynccontextmanager
@@ -88,6 +109,7 @@ def create_lifespan(settings, session_factory):
                     worker_id=worker_id,
                     stale_after_minutes=settings.ingestion_stale_after_minutes,
                     ingestion_timeout_seconds=settings.ingestion_timeout_seconds,
+                    lease_seconds=settings.ingestion_lease_seconds,
                 )
             )
             for worker_id in range(1, settings.document_ingestion_concurrency + 1)
@@ -118,13 +140,24 @@ def create_lifespan(settings, session_factory):
                 settings.chat_history_retention_days,
             )
         )
+        upload_recovery_task = asyncio.create_task(
+            _run_storage_upload_recovery(
+                session_factory,
+                settings.storage,
+            )
+        )
 
         try:
             yield
         finally:
             retention_task.cancel()
+            upload_recovery_task.cancel()
             try:
                 await retention_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await upload_recovery_task
             except asyncio.CancelledError:
                 pass
             for worker in ingestion_workers:

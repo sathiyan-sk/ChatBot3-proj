@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import PurePath
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import pymupdf
 from fastapi import (
     APIRouter,
     Depends,
@@ -50,6 +51,9 @@ from app.modules.documents.application.queries import (
 from app.modules.documents.application.services import (
     DocumentApplicationService,
 )
+from app.infrastructure.db.models.storage_upload_intent_model import (
+    StorageUploadIntentModel,
+)
 
 
 router = APIRouter(
@@ -79,6 +83,8 @@ def upload_document(
     service: DocumentApplicationService = Depends(
         get_document_application_service,
     ),
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
 ) -> DocumentResponse:
     upload_started_at = time.monotonic()
     filename = file.filename or ""
@@ -96,7 +102,18 @@ def upload_document(
             },
         )
 
-    content = file.file.read()
+    content = file.file.read(settings.max_upload_file_size_bytes + 1)
+    if len(content) > settings.max_upload_file_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "document_file_too_large",
+                "message": (
+                    "Uploaded file exceeds the configured limit of "
+                    f"{settings.max_upload_file_size_bytes} bytes."
+                ),
+            },
+        )
     if not content:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -106,14 +123,54 @@ def upload_document(
             },
         )
 
-    result = service.upload(
-        knowledge_base_id=(knowledge_base_id),
-        title=title,
-        description=description,
-        filename=filename,
-        content_type=file.content_type,
-        content=content,
+    if extension == ".pdf":
+        try:
+            with pymupdf.open(stream=content, filetype="pdf") as pdf:
+                page_count = pdf.page_count
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "pdf_preflight_failed",
+                    "message": "The uploaded PDF could not be opened.",
+                },
+            ) from exc
+        if page_count > settings.max_pdf_pages:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "code": "pdf_page_limit_exceeded",
+                    "message": (
+                        f"PDF exceeds the configured limit of "
+                        f"{settings.max_pdf_pages} pages."
+                    ),
+                },
+            )
+
+    document_id = uuid4()
+    storage_path = f"{knowledge_base_id}/{document_id}/{filename}"
+    upload_intent = StorageUploadIntentModel(
+        id=uuid4(),
+        storage_path=storage_path,
     )
+    session.add(upload_intent)
+    session.commit()
+    try:
+        result = service.upload(
+            knowledge_base_id=knowledge_base_id,
+            title=title,
+            description=description,
+            filename=filename,
+            content_type=file.content_type,
+            content=content,
+            document_id=document_id,
+        )
+        session.delete(upload_intent)
+        session.commit()
+    except Exception:
+        session.rollback()
+        service.cleanup_uploaded_source(storage_path)
+        raise
     logger.info(
         "Document upload stored and queued",
         extra={

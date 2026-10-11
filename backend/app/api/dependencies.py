@@ -20,6 +20,9 @@ from app.infrastructure.providers.llm.openrouter_provider import (
 from app.infrastructure.providers.parsing.html_parsing_provider import (
     HtmlParsingProvider,
 )
+from app.infrastructure.providers.parsing.docling_provider import (
+    DoclingParsingProvider,
+)
 from app.infrastructure.providers.parsing.ocr_provider import OcrParsingProvider
 from app.infrastructure.providers.parsing.pymupdf_provider import (
     PyMuPDFParsingProvider,
@@ -381,13 +384,35 @@ def build_knowledge_ingestion_pipeline(
         session=session,
     )
 
-    if source_type == "pdf":
+    if source_type in {"pdf", "docx"}:
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
-        parser = StructuredDocumentParser(
-            parsing_contract=PyMuPDFParsingProvider(),
-        )
+        parser_provider = settings.providers.parser.strip().lower()
+        if parser_provider == "docling":
+            parser = StructuredDocumentParser(
+                parsing_contract=DoclingParsingProvider(
+                    max_file_size_bytes=getattr(
+                        settings,
+                        "max_upload_file_size_bytes",
+                        20 * 1024 * 1024,
+                    ),
+                    max_pdf_pages=getattr(settings, "max_pdf_pages", 50),
+                ),
+            )
+        elif parser_provider == "native" and source_type == "pdf":
+            parser = StructuredDocumentParser(
+                parsing_contract=PyMuPDFParsingProvider(),
+            )
+        elif parser_provider == "native":
+            parser = StructuredDocumentParser(
+                parsing_contract=PythonDocxParsingProvider(),
+            )
+        else:
+            raise ValueError(
+                "Unsupported DOCUMENT_PARSER_PROVIDER "
+                f"{settings.providers.parser!r}; choose 'docling' or 'native'."
+            )
 
     elif source_type in {"txt", "text", "md", "markdown", "json"}:
         source_loader = FileSourceLoader(
@@ -395,15 +420,6 @@ def build_knowledge_ingestion_pipeline(
         )
 
         parser = TextDocumentParser()
-
-    elif source_type == "docx":
-        source_loader = FileSourceLoader(
-            storage_contract=storage_provider,
-        )
-
-        parser = StructuredDocumentParser(
-            parsing_contract=PythonDocxParsingProvider(),
-        )
 
     elif source_type == "website":
         source_loader = WebsiteSourceLoader()

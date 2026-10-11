@@ -5,6 +5,9 @@ from app.infrastructure.db.models.document_model import DocumentModel
 from app.infrastructure.db.models.knowledge_base_model import KnowledgeBaseModel
 from app.infrastructure.db.models.message_model import MessageModel
 from app.infrastructure.db.models.settings_model import SettingsModel
+from app.infrastructure.db.models.storage_upload_intent_model import (
+    StorageUploadIntentModel,
+)
 from app.infrastructure.db.models.widget_model import WidgetModel
 
 __all__ = [
@@ -16,4 +19,5 @@ __all__ = [
     "WidgetModel",
     "SettingsModel",
     "ApiKeyModel",
+    "StorageUploadIntentModel",
 ]

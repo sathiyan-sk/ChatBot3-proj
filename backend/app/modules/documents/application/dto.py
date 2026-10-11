@@ -23,3 +23,5 @@ class DocumentDto:
     updated_at: datetime
     ingestion_version: int = 0
     ready_version: int | None = None
+    failure_code: str | None = None
+    ingestion_attempt_count: int = 0
