@@ -75,11 +75,15 @@ def test_docling_provider_routes_pdf_and_docx_when_configured():
         assert isinstance(pipeline.parser.parsing_contract, DoclingParsingProvider)
 
 
-def test_docling_enables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
+def test_docling_enables_pdf_ocr_and_logs_conversion_phases(
+    monkeypatch,
+    caplog,
+):
     from docling.datamodel.base_models import ConversionStatus, InputFormat
     from docling.document_converter import DocumentConverter
     import pymupdf
 
+    caplog.set_level("INFO")
     artifacts_path = r"C:\docling-artifacts"
     monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", artifacts_path)
     monkeypatch.delenv("DOCLING_OCR_LANGUAGE", raising=False)
@@ -122,6 +126,10 @@ def test_docling_enables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
     assert options.artifacts_path == artifacts_path
     assert captured["raises_on_error"] is False
     assert parsed.content == "Selectable PDF text"
+    assert "Docling dependencies loaded:" in caplog.text
+    assert "Docling converter initialization completed:" in caplog.text
+    assert "Docling document conversion returned: status=success" in caplog.text
+    assert "Docling Markdown export completed:" in caplog.text
 
 
 def test_parser_provider_setting_is_normalized_and_rejected_when_unknown(

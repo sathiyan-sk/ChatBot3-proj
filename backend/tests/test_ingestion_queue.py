@@ -16,6 +16,7 @@ from app.api.admin.ingestion import (
     _run_document_ingestion_task_in_subprocess,
     claim_next_pending_document,
     start_ingestion,
+    touch_document_ingestion_heartbeat,
 )
 from app.api.schemas.ingestion import StartIngestionRequest
 from app.api.system import get_ingestion_worker_status
@@ -141,6 +142,86 @@ def test_claim_reclaims_expired_processing_document():
     assert document.status == "processing"
     assert document.ingestion_version == 2
     assert document.updated_at > datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def test_heartbeat_logs_document_state_when_lease_is_lost(caplog):
+    class _Result:
+        rowcount = 0
+
+        def one_or_none(self):
+            return SimpleNamespace(
+                status="processing",
+                ingestion_version=2,
+                ingestion_lease_expires_at=datetime(
+                    2026,
+                    10,
+                    12,
+                    tzinfo=timezone.utc,
+                ),
+            )
+
+    class _Session:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, statement):
+            self.calls += 1
+            return _Result()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            raise AssertionError("successful diagnostic query should not roll back")
+
+        def close(self):
+            pass
+
+    caplog.set_level("WARNING")
+    document_id = str(uuid4())
+    assert not touch_document_ingestion_heartbeat(
+        lambda: _Session(),
+        document_id,
+        ingestion_version=1,
+    )
+    assert f"document_id={document_id}" in caplog.text
+    assert "requested_version=1" in caplog.text
+    assert "observed_status=processing observed_version=2" in caplog.text
+
+
+def test_heartbeat_can_renew_expired_lease_if_attempt_is_not_superseded():
+    class _Result:
+        rowcount = 1
+
+    class _Session:
+        where_clause = None
+        committed = False
+
+        def execute(self, statement):
+            self.where_clause = str(
+                statement.whereclause.compile(dialect=postgresql.dialect())
+            )
+            return _Result()
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            raise AssertionError("successful heartbeat should not roll back")
+
+        def close(self):
+            pass
+
+    session = _Session()
+    assert touch_document_ingestion_heartbeat(
+        lambda: session,
+        str(uuid4()),
+        ingestion_version=1,
+    )
+    assert session.committed
+    assert "documents.status" in session.where_clause
+    assert "documents.ingestion_version" in session.where_clause
+    assert "ingestion_lease_expires_at" not in session.where_clause
 
 
 def test_document_ingestion_timeout_terminates_hung_task(monkeypatch):

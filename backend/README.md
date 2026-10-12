@@ -109,7 +109,10 @@ command. `DOCUMENT_INGESTION_CONCURRENCY` controls the worker count per service
 instance and defaults to `1`. Active jobs heartbeat while parsing, embedding,
 and indexing. A renewable database lease (`INGESTION_LEASE_SECONDS`, default
 `120`; heartbeat every 30 seconds) governs ownership. Jobs with expired leases
-are eligible for automatic worker reclamation. Attempts are bounded by
+are eligible for automatic worker reclamation; a delayed heartbeat may renew
+an expired lease only while the document remains in `processing` at the same
+ingestion version, so a reclaimed attempt cannot renew the newer owner's lease.
+Attempts are bounded by
 `INGESTION_MAX_ATTEMPTS` (default `3`); only provider failures explicitly
 classified as transient are retried, using capped exponential backoff with
 jitter (`INGESTION_RETRY_BASE_SECONDS=30`,
@@ -158,8 +161,9 @@ leave `DOCLING_ARTIFACTS_PATH` unset/blank so Docling can use its default cache
 and model download behavior. Do not set it to `.` unless that directory
 actually contains the required layout and OCR artifacts. Monitor the
 `parse_document` stage duration and Docling conversion logs. The parser logs
-byte count, elapsed time, page count, extracted character count, and section
-count, but never document text. Use
+dependency import, converter initialization, document conversion, and
+Markdown export timings, as well as page count and extracted character count,
+but never document text. Use
 `DOCUMENT_PARSER_PROVIDER=native` only when choosing the legacy PDF/DOCX
 parsers intentionally. Native PDF parsing is the fast, text-layer-only path:
 selectable text is collected across all pages and image-only pages or regions

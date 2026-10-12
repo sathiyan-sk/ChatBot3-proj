@@ -356,7 +356,17 @@ def claim_next_pending_document(
         if queued_at.tzinfo is None:
             queued_at = queued_at.replace(tzinfo=timezone.utc)
         logger.info(
-            "Claimed document ingestion job",
+            (
+                "Claimed document ingestion job: document_id=%s "
+                "ingestion_version=%d attempt=%d worker_id=%s "
+                "reclaimed_stale_job=%s queue_wait_seconds=%d"
+            ),
+            document_id,
+            ingestion_version,
+            document.ingestion_attempt_count,
+            worker_id,
+            was_stale,
+            max(0, int((claimed_at - queued_at).total_seconds())),
             extra={
                 "document_id": document_id,
                 "ingestion_version": ingestion_version,
@@ -453,7 +463,6 @@ def touch_document_ingestion_heartbeat(
                 DocumentModel.id == UUID(document_id),
                 DocumentModel.status == "processing",
                 DocumentModel.ingestion_version == ingestion_version,
-                DocumentModel.ingestion_lease_expires_at > now,
             )
             .values(
                 updated_at=now,
@@ -461,8 +470,36 @@ def touch_document_ingestion_heartbeat(
                 + timedelta(seconds=max(60, lease_seconds)),
             )
         )
+        if result.rowcount != 1:
+            state = session.execute(
+                select(
+                    DocumentModel.status,
+                    DocumentModel.ingestion_version,
+                    DocumentModel.ingestion_lease_expires_at,
+                ).where(DocumentModel.id == UUID(document_id))
+            ).one_or_none()
+            session.commit()
+            logger.warning(
+                (
+                    "Document ingestion lease heartbeat matched no row: "
+                    "document_id=%s requested_version=%d "
+                    "observed_status=%s observed_version=%s "
+                    "observed_lease_expires_at=%s checked_at=%s"
+                ),
+                document_id,
+                ingestion_version,
+                state.status if state is not None else "missing",
+                state.ingestion_version if state is not None else "missing",
+                (
+                    state.ingestion_lease_expires_at
+                    if state is not None
+                    else "missing"
+                ),
+                now.isoformat(),
+            )
+            return False
         session.commit()
-        return result.rowcount == 1
+        return True
     except Exception:
         session.rollback()
         raise

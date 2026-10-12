@@ -115,6 +115,12 @@ class DoclingParsingProvider(ParsingContract):
                 status_code=503,
             ) from exc
 
+        dependencies_loaded_at = time.monotonic()
+        logger.info(
+            "Docling dependencies loaded: duration_seconds=%.3f",
+            dependencies_loaded_at - started_at,
+        )
+
         try:
             input_format = (
                 InputFormat.PDF if extension == "pdf" else InputFormat.DOCX
@@ -144,9 +150,24 @@ class DoclingParsingProvider(ParsingContract):
                 format_options[InputFormat.PDF] = PdfFormatOption(
                     pipeline_options=pdf_options
                 )
+            converter_started_at = time.monotonic()
+            logger.info(
+                "Docling converter initialization started: source_type=%s",
+                extension,
+            )
             converter = DocumentConverter(
                 allowed_formats=[input_format],
                 format_options=format_options,
+            )
+            conversion_started_at = time.monotonic()
+            logger.info(
+                "Docling converter initialization completed: duration_seconds=%.3f",
+                conversion_started_at - converter_started_at,
+            )
+            logger.info(
+                "Docling document conversion started: source_type=%s bytes=%d",
+                extension,
+                len(source.content_bytes),
             )
             result = converter.convert(
                 DocumentStream(
@@ -155,14 +176,27 @@ class DoclingParsingProvider(ParsingContract):
                 ),
                 raises_on_error=False,
             )
+            conversion_completed_at = time.monotonic()
+            logger.info(
+                "Docling document conversion returned: status=%s duration_seconds=%.3f",
+                result.status.value,
+                conversion_completed_at - conversion_started_at,
+            )
             if result.status != ConversionStatus.SUCCESS:
                 raise RuntimeError(
                     f"Docling conversion status was {result.status.value}."
                 )
+            markdown_started_at = time.monotonic()
+            logger.info("Docling Markdown export started")
             markdown = result.document.export_to_markdown().strip()
+            logger.info(
+                "Docling Markdown export completed: duration_seconds=%.3f characters=%d",
+                time.monotonic() - markdown_started_at,
+                len(markdown),
+            )
         except Exception as exc:
             logger.exception(
-                "Docling conversion failed: source_type=%s duration_seconds=%.3f",
+                "Docling conversion failed: source_type=%s total_duration_seconds=%.3f",
                 extension,
                 time.monotonic() - started_at,
                 extra={"source_type": extension},
