@@ -75,13 +75,14 @@ def test_docling_provider_routes_pdf_and_docx_when_configured():
         assert isinstance(pipeline.parser.parsing_contract, DoclingParsingProvider)
 
 
-def test_docling_disables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
+def test_docling_enables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
     from docling.datamodel.base_models import ConversionStatus, InputFormat
     from docling.document_converter import DocumentConverter
     import pymupdf
 
     artifacts_path = r"C:\docling-artifacts"
     monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", artifacts_path)
+    monkeypatch.delenv("DOCLING_OCR_LANGUAGE", raising=False)
     pdf = pymupdf.open()
     pdf.new_page()
     pdf_bytes = pdf.tobytes()
@@ -115,7 +116,9 @@ def test_docling_disables_pdf_ocr_and_keeps_layout_processing(monkeypatch):
     )
 
     options = captured["format_options"][InputFormat.PDF].pipeline_options
-    assert options.do_ocr is False
+    assert options.do_ocr is True
+    assert options.ocr_options.backend == "onnxruntime"
+    assert options.ocr_options.lang == ["en"]
     assert options.artifacts_path == artifacts_path
     assert captured["raises_on_error"] is False
     assert parsed.content == "Selectable PDF text"
@@ -400,7 +403,7 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
     )
 
 
-def test_scanned_pdf_without_selectable_text_fails_with_clear_error():
+def test_scanned_pdf_without_selectable_text_fails_with_clear_error(caplog):
     pdf = pymupdf.open()
     source_pdf = pymupdf.open()
     source_page = source_pdf.new_page()
@@ -426,6 +429,10 @@ def test_scanned_pdf_without_selectable_text_fails_with_clear_error():
 
     assert exc_info.value.code == "pdf_text_not_found"
     assert "scanned" in exc_info.value.message.lower()
+    assert (
+        "pages=1, pages_with_selectable_text=0, "
+        "extracted_characters=0"
+    ) in caplog.text
 
 
 @pytest.mark.parametrize(

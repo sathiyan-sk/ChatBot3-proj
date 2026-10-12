@@ -73,7 +73,14 @@ class PyMuPDFParsingProvider(ParsingContract):
 
         extracted_text = "\n\n".join(page_text)
         logger.info(
-            "PyMuPDF selectable-text extraction completed",
+            (
+                "PyMuPDF selectable-text extraction completed: "
+                "pages=%d, pages_with_selectable_text=%d, "
+                "extracted_characters=%d"
+            ),
+            page_count,
+            pages_with_selectable_text,
+            len(extracted_text),
             extra={
                 "source_type": "pdf",
                 "page_count": page_count,
@@ -88,7 +95,14 @@ class PyMuPDFParsingProvider(ParsingContract):
 
         if not normalized_text:
             logger.warning(
-                "PDF contains no selectable text; image content is not OCR'd",
+                (
+                    "PDF contains no selectable text; image content is "
+                    "not OCR'd: pages=%d, pages_with_selectable_text=%d, "
+                    "extracted_characters=%d"
+                ),
+                page_count,
+                pages_with_selectable_text,
+                len(extracted_text),
                 extra={"page_count": page_count},
             )
             raise ApplicationError(

@@ -134,33 +134,36 @@ PDF and DOCX parsing is selected independently with
 `DOCUMENT_PARSER_PROVIDER=docling` (the default) or `native`. Docling processes
 PDF/DOCX uploads directly and conversion errors fail that ingestion attempt;
 the application does not silently retry with another parser. Docling PDF
-processing uses layout and table structure analysis with OCR explicitly
-disabled. It extracts text available in the PDF; scanned/image-only pages are
-not OCR'd. No selectable-text precheck is performed, but a document that
-produces no usable text chunks cannot be published as ready. Docling exports
-heading-aware sections and tables as Markdown; section headings are carried
-into generated chunks. Text, Markdown, JSON, CSV, website, and image sources
-keep their dedicated parsers.
+processing uses layout and table structure analysis with RapidOCR enabled in
+PDF-aware layout mode, so it can extract text from scanned pages and image
+regions while retaining selectable PDF text. RapidOCR uses ONNX Runtime and
+defaults to English; set `DOCLING_OCR_LANGUAGE` to one supported RapidOCR
+language code (for example `en`, `ch`, or `de`) for documents in another
+language. RapidOCR processes one language per run. OCR is only enabled for
+Docling PDF parsing; DOCX uses Docling's document conversion without the PDF
+OCR pipeline. A document that produces no usable text chunks still cannot be
+published as ready. Docling exports heading-aware sections and tables as
+Markdown; section headings are carried into generated chunks. Text, Markdown,
+JSON, CSV, website, and image sources keep their dedicated parsers.
 
-Docling's PDF layout and table analysis are more compute-intensive than plain
-text extraction and may download model artifacts on first use. OCR model
-artifacts are not needed while OCR is disabled. The ingestion worker runs each
-document in a fresh subprocess and enforces `INGESTION_TIMEOUT_SECONDS`
-(default `900`), so first-use downloads and conversion must fit the configured
-timeout and service CPU/memory limits. Prewarm
-Docling model artifacts during deployment and set `DOCLING_ARTIFACTS_PATH` to
-that directory when running offline; a configured path must contain all
-required Docling layout/table artifacts. Otherwise, leave
-`DOCLING_ARTIFACTS_PATH` unset/blank so Docling can use its default cache and
-model download behavior. Monitor the `parse_document` stage duration and
-Docling conversion logs. The parser logs byte count, elapsed time, page count,
-extracted character count, and section count, but never document text. Use
+Docling's PDF OCR, layout, and table analysis are more compute-intensive than
+plain text extraction and may download model artifacts on first use. The
+ingestion worker runs each document in a fresh subprocess and enforces
+`INGESTION_TIMEOUT_SECONDS` (default `900`), so first-use downloads and
+conversion must fit the configured timeout and service CPU/memory limits.
+Prewarm Docling model artifacts during deployment and set
+`DOCLING_ARTIFACTS_PATH` to that directory when running offline; a configured
+path must contain all required Docling layout and OCR artifacts. Otherwise,
+leave `DOCLING_ARTIFACTS_PATH` unset/blank so Docling can use its default cache
+and model download behavior. Do not set it to `.` unless that directory
+actually contains the required layout and OCR artifacts. Monitor the
+`parse_document` stage duration and Docling conversion logs. The parser logs
+byte count, elapsed time, page count, extracted character count, and section
+count, but never document text. Use
 `DOCUMENT_PARSER_PROVIDER=native` only when choosing the legacy PDF/DOCX
-parsers intentionally; native PDF parsing rejects scanned/image-only files.
-With the native PDF parser, selectable text is collected across all pages and
-image-only pages are skipped. A PDF that contains selectable text on at least
-one page proceeds even if other pages contain only images; image pixels are
-not OCR'd, and a PDF with no selectable text on any page is rejected.
+parsers intentionally. Native PDF parsing is the fast, text-layer-only path:
+selectable text is collected across all pages and image-only pages or regions
+are skipped without OCR. A PDF with no selectable text on any page is rejected.
 
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the

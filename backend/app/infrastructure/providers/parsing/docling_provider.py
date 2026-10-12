@@ -91,7 +91,11 @@ class DoclingParsingProvider(ParsingContract):
                 ConversionStatus,
                 InputFormat,
             )
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.datamodel.pipeline_options import (
+                OcrMode,
+                PdfPipelineOptions,
+                RapidOcrOptions,
+            )
             from docling.datamodel.pipeline_options import (
                 LayoutObjectDetectionOptions,
             )
@@ -120,8 +124,16 @@ class DoclingParsingProvider(ParsingContract):
                 artifacts_path = (
                     os.getenv("DOCLING_ARTIFACTS_PATH", "").strip() or None
                 )
+                ocr_language = (
+                    os.getenv("DOCLING_OCR_LANGUAGE", "en").strip() or "en"
+                )
                 pdf_options = PdfPipelineOptions(
-                    do_ocr=False,
+                    do_ocr=True,
+                    ocr_options=RapidOcrOptions(
+                        backend="onnxruntime",
+                        lang=[ocr_language],
+                        mode=OcrMode.DEFAULT,
+                    ),
                     artifacts_path=artifacts_path,
                     layout_options=LayoutObjectDetectionOptions(
                         engine_options=TransformersObjectDetectionEngineOptions(
