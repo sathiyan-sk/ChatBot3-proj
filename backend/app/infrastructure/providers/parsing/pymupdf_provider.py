@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from io import BytesIO
 
@@ -20,6 +21,8 @@ from app.knowledge_engine.shared.models import (
     ParsedDocument,
     RawSource,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -50,6 +53,7 @@ class PyMuPDFParsingProvider(ParsingContract):
                 filetype="pdf",
             ) as pdf:
                 page_text: list[str] = []
+                pages_with_selectable_text = 0
                 for page in pdf:
                     text = page.get_text(
                         "text",
@@ -57,6 +61,8 @@ class PyMuPDFParsingProvider(ParsingContract):
                     )
                     if isinstance(text, str) and text.strip():
                         page_text.append(text)
+                        pages_with_selectable_text += 1
+                page_count = pdf.page_count
 
         except Exception as exc:
             raise ApplicationError(
@@ -66,12 +72,25 @@ class PyMuPDFParsingProvider(ParsingContract):
             ) from exc
 
         extracted_text = "\n\n".join(page_text)
+        logger.info(
+            "PyMuPDF selectable-text extraction completed",
+            extra={
+                "source_type": "pdf",
+                "page_count": page_count,
+                "pages_with_selectable_text": pages_with_selectable_text,
+                "extracted_characters": len(extracted_text),
+            },
+        )
 
         normalized_text = normalize_whitespace(
             extracted_text,
         )
 
         if not normalized_text:
+            logger.warning(
+                "PDF contains no selectable text; image content is not OCR'd",
+                extra={"page_count": page_count},
+            )
             raise ApplicationError(
                 message=(
                     "No selectable text was found in "
@@ -105,5 +124,9 @@ class PyMuPDFParsingProvider(ParsingContract):
             metadata={
                 **source.metadata,
                 "parser": "pymupdf",
+                "page_count": str(page_count),
+                "pages_with_selectable_text": str(
+                    pages_with_selectable_text
+                ),
             },
         )

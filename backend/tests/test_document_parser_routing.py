@@ -259,6 +259,42 @@ def test_pymupdf_extracts_text_from_pdf_bytes():
     assert parsed.metadata["parser"] == "pymupdf"
 
 
+def test_pymupdf_extracts_selectable_text_and_ignores_image_only_pages():
+    image_pdf = pymupdf.open()
+    image_page = image_pdf.new_page()
+    image_page.insert_text((72, 72), "Text that exists only in an image")
+    image_pixmap = image_page.get_pixmap()
+    image_pdf.close()
+
+    pdf = pymupdf.open()
+    mixed_page = pdf.new_page()
+    mixed_page.insert_text((72, 72), "Selectable text remains indexable")
+    mixed_page.insert_image(
+        pymupdf.Rect(72, 100, 300, 300),
+        pixmap=image_pixmap,
+    )
+    image_only_page = pdf.new_page()
+    image_only_page.insert_image(
+        pymupdf.Rect(72, 72, 300, 300),
+        pixmap=image_pixmap,
+    )
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+
+    parsed = PyMuPDFParsingProvider().parse(
+        RawSource(
+            source_type="file",
+            source_identifier="mixed-content.pdf",
+            content_bytes=pdf_bytes,
+        )
+    )
+
+    assert "Selectable text remains indexable" in parsed.content
+    assert "Text that exists only in an image" not in parsed.content
+    assert parsed.metadata["page_count"] == "2"
+    assert parsed.metadata["pages_with_selectable_text"] == "1"
+
+
 def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
     from app.knowledge_engine.shared.models import EmbeddedChunk
 
@@ -345,7 +381,16 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
 
 def test_scanned_pdf_without_selectable_text_fails_with_clear_error():
     pdf = pymupdf.open()
-    pdf.new_page()
+    source_pdf = pymupdf.open()
+    source_page = source_pdf.new_page()
+    source_page.insert_text((72, 72), "Text available only as image pixels")
+    image_pixmap = source_page.get_pixmap()
+    source_pdf.close()
+    image_page = pdf.new_page()
+    image_page.insert_image(
+        pymupdf.Rect(72, 72, 500, 700),
+        pixmap=image_pixmap,
+    )
     pdf_bytes = pdf.tobytes()
     pdf.close()
 

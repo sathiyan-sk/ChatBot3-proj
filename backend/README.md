@@ -157,6 +157,10 @@ Docling conversion logs. The parser logs byte count, elapsed time, page count,
 extracted character count, and section count, but never document text. Use
 `DOCUMENT_PARSER_PROVIDER=native` only when choosing the legacy PDF/DOCX
 parsers intentionally; native PDF parsing rejects scanned/image-only files.
+With the native PDF parser, selectable text is collected across all pages and
+image-only pages are skipped. A PDF that contains selectable text on at least
+one page proceeds even if other pages contain only images; image pixels are
+not OCR'd, and a PDF with no selectable text on any page is rejected.
 
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the
