@@ -5,13 +5,20 @@ from typing import cast
 from uuid import uuid4
 
 from fastapi import UploadFile
+import httpx
+import pytest
 from sqlalchemy.orm import Session
+from app.config.settings import StorageSettings
 
 from app.api.admin.storage_upload_recovery import (
     cleanup_stale_storage_upload_intents,
 )
 from app.api.admin.documents import upload_document
 from app.config.settings import Settings
+from app.core.exceptions import ApplicationError
+from app.infrastructure.providers.storage.supabase_storage_provider import (
+    SupabaseStorageProvider,
+)
 
 
 class _IntentResults:
@@ -176,3 +183,90 @@ def test_upload_intent_and_document_are_committed_as_two_phase_saga():
         "intent_deleted",
         "committed",
     ]
+
+
+def test_supabase_delete_uses_remove_endpoint_and_json_prefix_for_unicode_path(
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_delete(method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured.update(kwargs)
+        return httpx.Response(200, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.storage.supabase_storage_provider.httpx.request",
+        fake_delete,
+    )
+    storage = SupabaseStorageProvider(
+        settings=StorageSettings(
+            supabase_url="https://storage.example",
+            supabase_bucket_name="data_files",
+            supabase_service_role_key="test-service-key",
+            provider_timeout_seconds=10,
+        )
+    )
+    storage_path = "kb/document/# Resume 🐛 (1).pdf"
+
+    storage.delete(storage_path)
+
+    assert captured["method"] == "DELETE"
+    assert captured["url"] == (
+        "https://storage.example/storage/v1/object/data_files"
+    )
+    assert captured["json"] == {"prefixes": [storage_path]}
+
+
+def test_supabase_delete_reports_upstream_error_for_recovery_retry(monkeypatch):
+    def fake_delete(method, url, **kwargs):
+        _ = kwargs
+        return httpx.Response(
+            400,
+            request=httpx.Request(method, url),
+            json={"message": "bad request"},
+        )
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.storage.supabase_storage_provider.httpx.request",
+        fake_delete,
+    )
+    storage = SupabaseStorageProvider(
+        settings=StorageSettings(
+            supabase_url="https://storage.example",
+            supabase_bucket_name="data_files",
+            supabase_service_role_key="test-service-key",
+            provider_timeout_seconds=10,
+        )
+    )
+
+    with pytest.raises(ApplicationError) as exc_info:
+        storage.delete("kb/document/file.pdf")
+
+    assert exc_info.value.code == "storage_delete_failed"
+    assert exc_info.value.details == {"upstream_status": 400}
+
+
+def test_supabase_delete_treats_missing_object_as_already_removed(monkeypatch):
+    def fake_delete(method, url, **kwargs):
+        _ = kwargs
+        return httpx.Response(
+            404,
+            request=httpx.Request(method, url),
+        )
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.storage.supabase_storage_provider.httpx.request",
+        fake_delete,
+    )
+    storage = SupabaseStorageProvider(
+        settings=StorageSettings(
+            supabase_url="https://storage.example",
+            supabase_bucket_name="data_files",
+            supabase_service_role_key="test-service-key",
+            provider_timeout_seconds=10,
+        )
+    )
+
+    storage.delete("kb/document/already-gone.pdf")

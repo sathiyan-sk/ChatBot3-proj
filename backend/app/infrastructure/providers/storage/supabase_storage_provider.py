@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
 
+from app.config.settings import StorageSettings
 from app.core.exceptions import ApplicationError
 from app.knowledge_engine.contracts.storage import StorageContract
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class SupabaseStorageProvider(StorageContract):
-    settings: object
+    settings: StorageSettings
 
     def _normalize_path(
         self,
@@ -150,10 +154,10 @@ class SupabaseStorageProvider(StorageContract):
 
     def download_bytes(
         self,
-        source_path: str,
+        storage_path: str,
     ) -> bytes:
         normalized_path = self._normalize_path(
-            source_path,
+            storage_path,
         )
 
         url = self._object_url(
@@ -194,19 +198,33 @@ class SupabaseStorageProvider(StorageContract):
     def delete(self, storage_path: str) -> None:
         normalized_path = self._normalize_path(storage_path)
         try:
-            response = httpx.delete(
-                self._object_url(normalized_path),
+            response = httpx.request(
+                "DELETE",
+                (
+                    f"{self.settings.supabase_url.rstrip('/')}"
+                    f"/storage/v1/object/"
+                    f"{self.settings.supabase_bucket_name}"
+                ),
                 headers=self._headers(),
+                json={"prefixes": [normalized_path]},
                 timeout=self.settings.provider_timeout_seconds,
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return
+            logger.warning(
+                "Supabase Storage object deletion failed",
+                extra={
+                    "upstream_status": exc.response.status_code,
+                    "storage_path": normalized_path,
+                },
+            )
             raise ApplicationError(
                 message="Uploaded file cleanup failed.",
                 code="storage_delete_failed",
                 status_code=502,
+                details={"upstream_status": exc.response.status_code},
             ) from exc
         except httpx.HTTPError as exc:
             raise ApplicationError(

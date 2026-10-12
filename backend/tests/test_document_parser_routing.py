@@ -298,6 +298,15 @@ def test_pymupdf_extracts_selectable_text_and_ignores_image_only_pages():
 def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
     from app.knowledge_engine.shared.models import EmbeddedChunk
 
+    image_source_pdf = pymupdf.open()
+    image_source_page = image_source_pdf.new_page()
+    image_source_page.insert_text(
+        (72, 72),
+        "IMAGE_ONLY_WORDS_MUST_NOT_BE_OCRD",
+    )
+    image_pixmap = image_source_page.get_pixmap()
+    image_source_pdf.close()
+
     pdf = pymupdf.open()
     page = pdf.new_page()
     page.insert_textbox(
@@ -307,6 +316,15 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
             + ("Customers can contact support for account assistance. " * 8)
             for index in range(1, 8)
         ),
+    )
+    page.insert_image(
+        pymupdf.Rect(50, 500, 150, 600),
+        pixmap=image_pixmap,
+    )
+    image_only_page = pdf.new_page()
+    image_only_page.insert_image(
+        pymupdf.Rect(50, 50, 250, 250),
+        pixmap=image_pixmap,
     )
     pdf_bytes = pdf.tobytes()
     pdf.close()
@@ -375,6 +393,9 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
     assert all(isinstance(chunk, EmbeddedChunk) for chunk in vector_store.indexed)
     assert all(chunk.embedding == [0.1, 0.2, 0.3] for chunk in vector_store.indexed)
     assert "Support policy section" in " ".join(
+        chunk.content for chunk in vector_store.indexed
+    )
+    assert "IMAGE_ONLY_WORDS_MUST_NOT_BE_OCRD" not in " ".join(
         chunk.content for chunk in vector_store.indexed
     )
 
