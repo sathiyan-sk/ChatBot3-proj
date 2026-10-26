@@ -321,22 +321,6 @@
     });
   }
 
-  function showBackendError(response, fallback) {
-    let message = fallback;
-    try {
-      return response.clone().json().then((data) => {
-        const detail = data?.error?.message || data?.detail?.message || data?.detail || fallback;
-        const messageText = typeof detail === "string" ? detail : fallback;
-        addMessage(messageText, "bot");
-      }, () => {
-        addMessage(fallback, "bot");
-      });
-    } catch {
-      addMessage(fallback, "bot");
-    }
-    return null;
-  }
-
   // Handle queries
   async function handleQuerySubmit(e) {
     e.preventDefault();
