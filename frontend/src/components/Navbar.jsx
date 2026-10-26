@@ -29,22 +29,40 @@ export default function Navbar({ onLogout }) {
   const isLoggedIn = !!adminUser;
 
   // Check backend health once when the frontend-backend connection is established
-  useEffect(() => {
-    let isMounted = true;
-    const checkHealth = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/health`);
-        const data = await res.json();
-        if (isMounted) setHealth(data.status === "OK" ? "ok" : "degraded");
-      } catch {
-        if (isMounted) setHealth("down");
+useEffect(() => {
+  let isMounted = true;
+
+  const checkHealth = async () => {
+    try {
+      const res = await fetch(
+        `${window.location.origin}/health`,
+        { method: "GET" }
+      );
+
+      if (!res.ok) {
+        throw new Error(`Health check failed: HTTP ${res.status}`);
       }
-    };
-    checkHealth();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+
+      const data = await res.json();
+
+      if (isMounted) {
+        setHealth(data.status === "OK" ? "ok" : "degraded");
+      }
+    } catch (error) {
+      console.error("Backend health check failed:", error);
+
+      if (isMounted) {
+        setHealth("down");
+      }
+    }
+  };
+
+  checkHealth();
+
+  return () => {
+    isMounted = false;
+  };
+}, []);
 
   const healthTone =
     health === "ok" ? "text-emerald-400" : health === "down" ? "text-red-400" : "text-amber-400";
