@@ -30,6 +30,7 @@ from app.knowledge_engine.pipelines.question_answering_pipeline import (
 from app.knowledge_engine.retrieval.conversation_context_builder import (
     ConversationContextBuilder,
 )
+from app.knowledge_engine.retrieval.context_builder import ContextBuilder
 from app.knowledge_engine.retrieval.hybrid_retriever import HybridRetriever
 from app.knowledge_engine.retrieval.metadata_filter import MetadataFilter
 from app.knowledge_engine.retrieval.query_embedder import QueryEmbedder
@@ -275,6 +276,7 @@ def test_qa_pipeline_finishes_parent_trace_for_no_retrieval():
         hybrid_retriever=HybridRetriever(_EmptyVectorStore()),
         metadata_filter=MetadataFilter(),
         reranker=Reranker(),
+        context_builder=ContextBuilder(),
         prompt_builder=PromptBuilder(),
         response_generator=ResponseGenerator(_UnusedLlmProvider()),
         citation_builder=CitationBuilder(),

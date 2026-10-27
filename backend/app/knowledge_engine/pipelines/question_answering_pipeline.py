@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 
@@ -8,6 +9,7 @@ from app.knowledge_engine.generation.citation_builder import CitationBuilder
 from app.knowledge_engine.generation.prompt_builder import PromptBuilder
 from app.knowledge_engine.generation.response_formatter import ResponseFormatter
 from app.knowledge_engine.generation.response_generator import ResponseGenerator
+from app.knowledge_engine.retrieval.context_builder import ContextBuilder
 from app.knowledge_engine.retrieval.conversation_context_builder import (
     ConversationContextBuilder,
 )
@@ -20,6 +22,8 @@ from app.knowledge_engine.shared.models import (
     QuestionAnsweringPipelineResult,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class QuestionAnsweringPipeline:
@@ -28,11 +32,15 @@ class QuestionAnsweringPipeline:
     hybrid_retriever: HybridRetriever
     metadata_filter: MetadataFilter
     reranker: Reranker
+    context_builder: ContextBuilder
     prompt_builder: PromptBuilder
     response_generator: ResponseGenerator
     citation_builder: CitationBuilder
     response_formatter: ResponseFormatter
     trace_observer: TraceObserver | None = field(default=None)
+    max_context_tokens: int = 2000
+    initial_candidate_multiplier: int = 2
+    min_initial_candidates: int = 10
 
     def run(
         self,
@@ -75,28 +83,43 @@ class QuestionAnsweringPipeline:
             )
             query_embedding = self.query_embedder.embed(request.query_text)
 
-            # Retrieve MORE chunks initially for better coverage
-            initial_top_k = max(request.top_k * 2, 10)  # At least 10, or 2x the final top_k
+            # Retrieve MORE chunks initially than ``request.top_k`` so the
+            # reranker and context builder have enough signal to (a) score
+            # relevance accurately and (b) assemble a diverse, multi-document
+            # context. RRF fusion already dedupes within hybrid retrieval.
+            initial_top_k = max(
+                request.top_k * self.initial_candidate_multiplier,
+                self.min_initial_candidates,
+            )
             retrieved_chunks = self.hybrid_retriever.retrieve(
                 knowledge_base_id=request.knowledge_base_id,
                 query_text=request.query_text,
                 query_embedding=query_embedding,
                 top_k=initial_top_k,
             )
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"Retrieved {len(retrieved_chunks)} chunks:")
-            for i, chunk in enumerate(retrieved_chunks[:5], start=1):
-                logger.info(f"[{i}] Score: {chunk.score:.3f}, Title: {chunk.document_title}, Content: {chunk.content[:200]}...")
+            logger.debug("Retrieved %d candidate chunks.", len(retrieved_chunks))
 
             filtered_chunks = self.metadata_filter.apply(retrieved_chunks)
+            logger.debug("Filtered to %d chunks.", len(filtered_chunks))
+
+            # Rerank over the full candidate set so the context builder has
+            # material to pick a diverse subset from; final truncation to
+            # ``request.top_k`` (with token budgeting) happens in the context
+            # builder.
             reranked_chunks = self.reranker.rerank(
                 query_text=request.query_text,
                 chunks=filtered_chunks,
-                top_k=request.top_k,
+                top_k=initial_top_k,
+            )
+            logger.debug("Reranked to %d chunks.", len(reranked_chunks))
+
+            context_chunks = self.context_builder.build(
+                chunks=reranked_chunks,
+                max_chunks=request.top_k,
+                max_tokens=self.max_context_tokens,
             )
 
-            if not reranked_chunks:
+            if not context_chunks:
                 logger.info(
                     "No relevant chunks retrieved for query '%s'; using safe fallback response.",
                     request.query_text,
@@ -124,7 +147,7 @@ class QuestionAnsweringPipeline:
             user_prompt = self.prompt_builder.build_user_prompt(
                 query_text=request.query_text,
                 conversation_messages=conversation_context,
-                retrieved_chunks=reranked_chunks,
+                retrieved_chunks=context_chunks,
             )
 
             llm_generation = self.response_generator.generate(
@@ -132,12 +155,12 @@ class QuestionAnsweringPipeline:
                 user_prompt=user_prompt,
                 temperature=request.llm_temperature,
             )
-            citations = self.citation_builder.build(reranked_chunks)
+            citations = self.citation_builder.build(context_chunks)
 
             result = self.response_formatter.format(
                 answer_text=llm_generation.text,
                 citations=citations,
-                retrieved_chunks=reranked_chunks,
+                retrieved_chunks=context_chunks,
                 llm_generation=llm_generation,
             )
             trace_context.end(

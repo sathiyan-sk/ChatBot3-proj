@@ -125,6 +125,16 @@ class Settings:
     langsmith_project: str | None = None
     langsmith_endpoint: str | None = None
 
+    # Retrieval pipeline tuning (hybrid search, rerank, context assembly).
+    retrieval_initial_multiplier: int = 2
+    retrieval_min_initial_chunks: int = 10
+    retrieval_rrf_k: int = 60
+    retrieval_lexical_weight: float = 0.4
+    retrieval_diversity_lambda: float = 0.7
+    retrieval_max_context_tokens: int = 2000
+    retrieval_max_chunk_chars: int = 600
+    retrieval_min_score: float = 0.0
+
 def load_settings() -> Settings:
     parser_provider = os.getenv(
         "DOCUMENT_PARSER_PROVIDER",
@@ -438,6 +448,26 @@ def load_settings() -> Settings:
         langsmith_api_key=langsmith_api_key,
         langsmith_project=langsmith_project,
         langsmith_endpoint=langsmith_endpoint,
+        retrieval_initial_multiplier=int(
+            os.getenv("RETRIEVAL_INITIAL_MULTIPLIER", "2")
+        ),
+        retrieval_min_initial_chunks=int(
+            os.getenv("RETRIEVAL_MIN_INITIAL_CHUNKS", "10")
+        ),
+        retrieval_rrf_k=int(os.getenv("RETRIEVAL_RRF_K", "60")),
+        retrieval_lexical_weight=float(
+            os.getenv("RETRIEVAL_LEXICAL_WEIGHT", "0.4")
+        ),
+        retrieval_diversity_lambda=float(
+            os.getenv("RETRIEVAL_DIVERSITY_LAMBDA", "0.7")
+        ),
+        retrieval_max_context_tokens=max(
+            0, int(os.getenv("RETRIEVAL_MAX_CONTEXT_TOKENS", "2000"))
+        ),
+        retrieval_max_chunk_chars=int(
+            os.getenv("RETRIEVAL_MAX_CHUNK_CHARS", "600")
+        ),
+        retrieval_min_score=float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0")),
     )
 
 

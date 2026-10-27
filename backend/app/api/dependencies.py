@@ -64,6 +64,7 @@ from app.knowledge_engine.pipelines.question_answering_pipeline import (
 from app.knowledge_engine.retrieval.conversation_context_builder import (
     ConversationContextBuilder,
 )
+from app.knowledge_engine.retrieval.context_builder import ContextBuilder
 from app.knowledge_engine.retrieval.hybrid_retriever import HybridRetriever
 from app.knowledge_engine.retrieval.metadata_filter import MetadataFilter
 from app.knowledge_engine.retrieval.query_embedder import QueryEmbedder
@@ -307,10 +308,19 @@ def get_question_answering_pipeline(
         hybrid_retriever=(
             HybridRetriever(
                 vector_store_contract=vector_provider,
+                rrf_k=settings.retrieval_rrf_k,
             )
         ),
-        metadata_filter=MetadataFilter(),
-        reranker=Reranker(),
+        metadata_filter=MetadataFilter(
+            min_score=settings.retrieval_min_score,
+        ),
+        reranker=Reranker(
+            lexical_weight=settings.retrieval_lexical_weight,
+        ),
+        context_builder=ContextBuilder(
+            diversity_lambda=settings.retrieval_diversity_lambda,
+            max_chunk_chars=settings.retrieval_max_chunk_chars,
+        ),
         prompt_builder=PromptBuilder(),
         response_generator=(
             ResponseGenerator(
@@ -320,6 +330,9 @@ def get_question_answering_pipeline(
         citation_builder=CitationBuilder(),
         response_formatter=ResponseFormatter(),
         trace_observer=trace_observer,
+        max_context_tokens=settings.retrieval_max_context_tokens,
+        initial_candidate_multiplier=settings.retrieval_initial_multiplier,
+        min_initial_candidates=settings.retrieval_min_initial_chunks,
     )
 
 

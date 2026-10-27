@@ -171,6 +171,12 @@ class PgVectorProvider(VectorStoreContract):
     ) -> list[RetrievedChunk]:
         table_name = self.settings.vector_store_table_name
 
+        escaped_query = (
+            query_text.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+
         statement = text(
             f"""
             select
@@ -180,9 +186,13 @@ class PgVectorProvider(VectorStoreContract):
                 chunks.content,
                 chunks.source_uri,
                 chunks.metadata_json,
-                ts_rank_cd(
-                to_tsvector('english', chunks.content),
-                plainto_tsquery('english', :query_text)
+                (
+                    ts_rank_cd(
+                    to_tsvector('english', chunks.content),
+                    plainto_tsquery('english', :query_text)
+                    )
+                    + case when chunks.content ilike '%' || :escaped_query || '%' escape '\\' then 1.5 else 0.0 end
+                    + case when chunks.document_title ilike '%' || :escaped_query || '%' escape '\\' then 1.0 else 0.0 end
                 ) as score
             from {table_name} AS chunks
             join documents AS document
@@ -195,7 +205,11 @@ class PgVectorProvider(VectorStoreContract):
              and knowledge_base.application_id = document.application_id
             where chunks.knowledge_base_id = cast(:knowledge_base_id as text)
               and document.status in ('ready', 'processing', 'failed')
-              and to_tsvector('english', chunks.content) @@ plainto_tsquery('english', :query_text)
+              and (
+                to_tsvector('english', chunks.content) @@ plainto_tsquery('english', :query_text)
+                or chunks.content ilike '%' || :escaped_query || '%' escape '\\'
+                or chunks.document_title ilike '%' || :escaped_query || '%' escape '\\'
+              )
             order by score desc
             limit :top_k
             """
@@ -206,6 +220,7 @@ class PgVectorProvider(VectorStoreContract):
             {
                 "knowledge_base_id": str(knowledge_base_id) if not isinstance(knowledge_base_id, str) else knowledge_base_id,
                 "query_text": query_text,
+                "escaped_query": escaped_query,
                 "top_k": top_k,
             },
         )
