@@ -34,10 +34,10 @@ useEffect(() => {
 
   const checkHealth = async () => {
     try {
-      const res = await fetch(
-        `${window.location.origin}/health`,
-        { method: "GET" }
-      );
+     // Frontend/src/components/Navbar.jsx
+// line 37-40 (replace)
+const res = await fetch(`${BACKEND_URL}/health`, { method: "GET" });
+
 
       if (!res.ok) {
         throw new Error(`Health check failed: HTTP ${res.status}`);
@@ -66,7 +66,7 @@ useEffect(() => {
 
   const healthTone =
     health === "ok" ? "text-emerald-400" : health === "down" ? "text-red-400" : "text-amber-400";
-  const healthLabel = health === "ok" ? "OK" : health === "down" ? "OFFLINE" : "...";
+  const healthLabel = health === "ok" ? "Online" : health === "down" ? "offline" : "...";
 
   const navLinkClass = (active) =>
     `flex items-center gap-2 px-4 h-8 rounded-[10px] text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00D4FF] ${
