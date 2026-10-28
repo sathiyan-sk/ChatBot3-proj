@@ -48,6 +48,9 @@ from app.knowledge_engine.ingestion.parsers.text_parser import TextDocumentParse
 from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
     StructuredDocumentParser,
 )
+from app.knowledge_engine.ingestion.parsers.quality_aware_document_parser import (
+    QualityAwareDocumentParser,
+)
 from app.knowledge_engine.ingestion.parsers.csv_parser import CsvDocumentParser
 from app.knowledge_engine.ingestion.source_loaders.csv_loader import CsvSourceLoader
 from app.knowledge_engine.ingestion.source_loaders.file_loader import FileSourceLoader
@@ -402,7 +405,36 @@ def build_knowledge_ingestion_pipeline(
             storage_contract=storage_provider,
         )
         parser_provider = settings.providers.parser.strip().lower()
-        if parser_provider == "docling":
+        if parser_provider == "auto":
+            if source_type == "pdf":
+                parser = QualityAwareDocumentParser(
+                    fast_parser=PyMuPDFParsingProvider(),
+                    ocr_parser=DoclingParsingProvider(
+                        max_file_size_bytes=getattr(
+                            settings,
+                            "max_upload_file_size_bytes",
+                            20 * 1024 * 1024,
+                        ),
+                        max_pdf_pages=getattr(settings, "max_pdf_pages", 50),
+                        do_ocr=True,
+                    ),
+                    selectable_ratio_threshold=getattr(
+                        settings, "selectable_text_ratio_threshold", 0.5
+                    ),
+                )
+            else:
+                parser = StructuredDocumentParser(
+                    parsing_contract=DoclingParsingProvider(
+                        max_file_size_bytes=getattr(
+                            settings,
+                            "max_upload_file_size_bytes",
+                            20 * 1024 * 1024,
+                        ),
+                        max_pdf_pages=getattr(settings, "max_pdf_pages", 50),
+                        do_ocr=False,
+                    ),
+                )
+        elif parser_provider == "docling":
             parser = StructuredDocumentParser(
                 parsing_contract=DoclingParsingProvider(
                     max_file_size_bytes=getattr(
@@ -424,7 +456,8 @@ def build_knowledge_ingestion_pipeline(
         else:
             raise ValueError(
                 "Unsupported DOCUMENT_PARSER_PROVIDER "
-                f"{settings.providers.parser!r}; choose 'docling' or 'native'."
+                f"{settings.providers.parser!r}; choose 'docling', "
+                "'native' or 'auto'."
             )
 
     elif source_type in {"txt", "text", "md", "markdown", "json"}:

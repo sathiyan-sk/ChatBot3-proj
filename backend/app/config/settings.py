@@ -120,6 +120,9 @@ class Settings:
     ingestion_retry_max_seconds: float = 300.0
     max_upload_file_size_bytes: int = 20 * 1024 * 1024
     max_pdf_pages: int = 50
+    # Minimum fraction of pages with selectable text required to take the
+    # PyMuPDF fast path (no OCR). Below this, image-only pages are OCR'd.
+    selectable_text_ratio_threshold: float = 0.5
     langsmith_tracing: bool = False
     langsmith_api_key: str | None = None
     langsmith_project: str | None = None
@@ -140,10 +143,19 @@ def load_settings() -> Settings:
         "DOCUMENT_PARSER_PROVIDER",
         "docling",
     ).strip().lower()
-    if parser_provider not in {"docling", "native"}:
+    if parser_provider not in {"docling", "native", "auto"}:
         raise ValueError(
             "Unsupported DOCUMENT_PARSER_PROVIDER "
-            f"{parser_provider!r}; choose 'docling' or 'native'."
+            f"{parser_provider!r}; choose 'docling', 'native' or 'auto'."
+        )
+
+    selectable_text_ratio_threshold = float(
+        os.getenv("SELECTABLE_TEXT_RATIO_THRESHOLD", "0.5")
+    )
+    if not 0.0 <= selectable_text_ratio_threshold <= 1.0:
+        raise ValueError(
+            "SELECTABLE_TEXT_RATIO_THRESHOLD must be a number between "
+            "0.0 and 1.0."
         )
 
     langsmith_tracing = os.getenv(
@@ -444,6 +456,7 @@ def load_settings() -> Settings:
             1,
             int(os.getenv("MAX_PDF_PAGES", "50")),
         ),
+        selectable_text_ratio_threshold=selectable_text_ratio_threshold,
         langsmith_tracing=langsmith_tracing,
         langsmith_api_key=langsmith_api_key,
         langsmith_project=langsmith_project,

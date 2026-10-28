@@ -169,6 +169,19 @@ parsers intentionally. Native PDF parsing is the fast, text-layer-only path:
 selectable text is collected across all pages and image-only pages or regions
 are skipped without OCR. A PDF with no selectable text on any page is rejected.
 
+`DOCUMENT_PARSER_PROVIDER=auto` (opt-in) selects parsing per document instead
+of per provider. PDFs are first extracted with PyMuPDF's fast text layer, and
+only documents that PyMuPDF cannot read as selectable text fall back to Docling
+OCR. Mixed pages keep their selectable text, and only image-only pages are
+rasterized for OCR, so recoverable text is never lost and selectable text is
+never OCR'd twice (see `QualityAwareDocumentParser`). When the fraction of
+pages with selectable text falls below `SELECTABLE_TEXT_RATIO_THRESHOLD`
+(default `0.5`), the image-only pages are sent to Docling for selective OCR
+rather than a full re-scan. PyMuPDF now also retries `text` -> `words` -> `blocks`
+extraction per page, which prevents text-based PDFs from being falsely rejected
+as "scanned". This is the recommended mode for mixed text/scanned workloads;
+the default remains `docling` to preserve the no-silent-retry guarantee above.
+
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the
 service-role key; do not expose source files through public object URLs. Each

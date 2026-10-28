@@ -23,6 +23,9 @@ _MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 class DoclingParsingProvider(ParsingContract):
     max_file_size_bytes: int = 20 * 1024 * 1024
     max_pdf_pages: int = 50
+    do_ocr: bool = True
+    ocr_mode: str = "default"
+    ocr_image_dpi: int = 144
 
     def parse(self, source: RawSource) -> ParsedDocument:
         if source.content_bytes is None:
@@ -133,19 +136,28 @@ class DoclingParsingProvider(ParsingContract):
                 ocr_language = (
                     os.getenv("DOCLING_OCR_LANGUAGE", "en").strip() or "en"
                 )
-                pdf_options = PdfPipelineOptions(
-                    do_ocr=True,
-                    ocr_options=RapidOcrOptions(
-                        backend="onnxruntime",
-                        lang=[ocr_language],
-                        mode=OcrMode.DEFAULT,
-                    ),
-                    artifacts_path=artifacts_path,
-                    layout_options=LayoutObjectDetectionOptions(
+                pdf_pipeline_kwargs: dict = {
+                    "artifacts_path": artifacts_path,
+                    "layout_options": LayoutObjectDetectionOptions(
                         engine_options=TransformersObjectDetectionEngineOptions(
                             compile_model=False
                         )
                     ),
+                }
+                if self.do_ocr:
+                    ocr_mode_value = {
+                        "accurate": OcrMode.ACCURATE,
+                        "skip": OcrMode.SKIP,
+                        "default": OcrMode.DEFAULT,
+                    }.get(self.ocr_mode, OcrMode.DEFAULT)
+                    pdf_pipeline_kwargs["do_ocr"] = True
+                    pdf_pipeline_kwargs["ocr_options"] = RapidOcrOptions(
+                        backend="onnxruntime",
+                        lang=[ocr_language],
+                        mode=ocr_mode_value,
+                    )
+                pdf_options = PdfPipelineOptions(
+                    **pdf_pipeline_kwargs,
                 )
                 format_options[InputFormat.PDF] = PdfFormatOption(
                     pipeline_options=pdf_options
@@ -255,6 +267,90 @@ class DoclingParsingProvider(ParsingContract):
             },
             structured_sections=structured_sections,
         )
+
+    def parse_image_pages(
+        self,
+        source: RawSource,
+        page_numbers: list[int],
+    ) -> str:
+        """Run OCR on ONLY the requested (image-only) pages.
+
+        This is the selective-OCR hook used by the quality-aware orchestrator:
+        pages whose text was already recovered by PyMuPDF are never
+        reprocessed, so selectable text is preserved and no OCR duplication
+        occurs. Each requested page is rasterized and handed to Docling's
+        image OCR pipeline individually.
+        """
+        if not page_numbers:
+            return ""
+
+        if source.content_bytes is None:
+            raise ApplicationError(
+                message="OCR source bytes are required.",
+                code="ocr_source_bytes_required",
+                status_code=422,
+            )
+
+        try:
+            import pymupdf
+            from docling.datamodel.base_models import (
+                ConversionStatus,
+                InputFormat,
+            )
+            from docling.document_converter import DocumentConverter
+            from docling_core.types.io import DocumentStream
+        except ImportError as exc:
+            raise ApplicationError(
+                message="Docling image-OCR dependencies are unavailable.",
+                code="docling_dependency_missing",
+                status_code=503,
+            ) from exc
+
+        images: list[tuple[str, bytes]] = []
+        try:
+            with pymupdf.open(
+                stream=BytesIO(source.content_bytes),
+                filetype="pdf",
+            ) as pdf:
+                for page_number in page_numbers:
+                    page = pdf[page_number - 1]
+                    pixmap = page.get_pixmap(dpi=self.ocr_image_dpi)
+                    images.append(
+                        (f"page-{page_number}.png", pixmap.tobytes("png"))
+                    )
+        except Exception as exc:
+            raise ApplicationError(
+                message=f"Failed to rasterize image-only pages: {exc}",
+                code="pdf_rasterization_failed",
+                status_code=422,
+            ) from exc
+
+        if not images:
+            return ""
+
+        converter = DocumentConverter(allowed_formats=[InputFormat.IMAGE])
+        extracted: list[str] = []
+        for name, png_bytes in images:
+            try:
+                result = converter.convert(
+                    DocumentStream(
+                        name=name,
+                        stream=BytesIO(png_bytes),
+                    ),
+                    raises_on_error=False,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Docling image OCR failed for page: %s (%s)",
+                    name,
+                    exc,
+                )
+                continue
+            if result.status == ConversionStatus.SUCCESS:
+                markdown = result.document.export_to_markdown().strip()
+                if markdown:
+                    extracted.append(markdown)
+        return extracted
 
     @staticmethod
     def _extract_sections(

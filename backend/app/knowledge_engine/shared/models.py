@@ -22,12 +22,27 @@ class DocumentSection:
 
 
 @dataclass(slots=True, frozen=True)
+class ExtractedPage:
+    """Per-page extraction result used by the quality-aware orchestrator.
+
+    ``text`` is the selectable text recovered for the page (may be empty for
+    image-only/scanned pages). ``has_selectable_text`` is the fast negative
+    signal the orchestrator uses to decide whether OCR is required.
+    """
+
+    page_number: int
+    text: str
+    has_selectable_text: bool
+
+
+@dataclass(slots=True, frozen=True)
 class ParsedDocument:
     title: str
     content: str
     sections: list[str]
     metadata: dict[str, str] = field(default_factory=dict)
     structured_sections: list[DocumentSection] = field(default_factory=list)
+    page_results: list[ExtractedPage] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +52,7 @@ class NormalizedDocument:
     sections: list[str]
     metadata: dict[str, str] = field(default_factory=dict)
     structured_sections: list[DocumentSection] = field(default_factory=list)
+    page_results: list[ExtractedPage] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

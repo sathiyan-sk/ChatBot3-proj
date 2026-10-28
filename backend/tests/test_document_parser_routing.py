@@ -26,6 +26,9 @@ from app.knowledge_engine.ingestion.parsers.csv_parser import CsvDocumentParser
 from app.knowledge_engine.ingestion.parsers.structured_document_parser import (
     StructuredDocumentParser,
 )
+from app.knowledge_engine.ingestion.parsers.quality_aware_document_parser import (
+    QualityAwareDocumentParser,
+)
 from app.knowledge_engine.ingestion.parsers.text_parser import TextDocumentParser
 from app.knowledge_engine.ingestion.source_loaders.file_loader import FileSourceLoader
 from app.knowledge_engine.shared.models import (
@@ -581,3 +584,273 @@ def test_upload_api_supports_the_formats_shown_in_the_registry():
         ".json",
         ".md",
     }
+
+
+def _auto_pipeline_for(source_type: str):
+    return _pipeline_for_provider(source_type, "auto")
+
+
+def test_auto_provider_routes_pdf_to_quality_aware_orchestrator():
+    pipeline = _auto_pipeline_for("pdf")
+
+    assert isinstance(pipeline.source_loader, FileSourceLoader)
+    assert isinstance(pipeline.parser, QualityAwareDocumentParser)
+    assert isinstance(
+        pipeline.parser.fast_parser, PyMuPDFParsingProvider
+    )
+    assert isinstance(pipeline.parser.ocr_parser, DoclingParsingProvider)
+    # OCR is enabled on the Docling fallback so scanned PDFs are recovered.
+    assert pipeline.parser.ocr_parser.do_ocr is True
+
+
+def test_auto_provider_routes_docx_to_layout_aware_docling():
+    pipeline = _auto_pipeline_for("docx")
+
+    assert isinstance(pipeline.parser, StructuredDocumentParser)
+    assert isinstance(pipeline.parser.parsing_contract, DoclingParsingProvider)
+    # DOCX has a native text layer; layout pass only, no OCR.
+    assert pipeline.parser.parsing_contract.do_ocr is False
+
+
+def test_quality_aware_pdf_fast_path_does_not_invoke_ocr(monkeypatch):
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Knowledge base PDF fixture")
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="guide.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    pipeline = _auto_pipeline_for("pdf")
+
+    # If the fast path works, Docling must never be invoked on a text PDF.
+    monkeypatch.setattr(
+        DoclingParsingProvider,
+        "parse",
+        lambda self, src: pytest.fail("Docling should not be called on text PDFs"),
+    )
+
+    parsed = pipeline.parser.parse(source)
+
+    assert "Knowledge base PDF fixture" in parsed.content
+    assert parsed.metadata["parser"] == "pymupdf"
+    assert parsed.metadata["ocr_applied"] == "false"
+    assert parsed.metadata["page_count"] == "1"
+    assert parsed.metadata["pages_with_selectable_text"] == "1"
+    assert parsed.page_results[0].has_selectable_text is True
+
+
+def test_quality_aware_scanned_pdf_falls_back_to_docling_ocr(monkeypatch):
+    # Image-only page -> PyMuPDF reports pdf_text_not_found -> Docling OCR.
+    image_pdf = pymupdf.open()
+    image_page = image_pdf.new_page()
+    image_page.insert_text((72, 72), "Not selectable")
+    pixmap = image_page.get_pixmap()
+    image_pdf.close()
+
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_image(pymupdf.Rect(72, 72, 300, 300), pixmap=pixmap)
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="scanned.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    pipeline = _auto_pipeline_for("pdf")
+
+    monkeypatch.setattr(
+        DoclingParsingProvider,
+        "parse",
+        lambda self, src: ParsedDocument(
+            title="scanned.pdf",
+            content="OCR recovered text",
+            sections=["OCR recovered text"],
+            metadata={"parser": "docling"},
+        ),
+    )
+
+    parsed = pipeline.parser.parse(source)
+
+    assert parsed.content == "OCR recovered text"
+    assert parsed.metadata["parser"] == "docling"
+    assert parsed.metadata["ocr_applied"] == "true"
+
+
+def test_quality_aware_text_pdf_with_sort_text_failure_still_extracts(monkeypatch):
+    # Regression guard for the false "No selectable text was found" on text
+    # based PDFs: if the primary sort=True extraction yields nothing but a
+    # fallback mode recovers the text, the document must NOT be rejected.
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Recoverable selectable text")
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="fallback.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    # Force the primary (sort=True) extraction path to return empty so the
+    # fallback mode is the only thing that recovers the text. Using type(page)
+    # keeps this robust across PyMuPDF versions (pymupdf.Page vs PDFPage).
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Recoverable selectable text")
+    page_cls = type(page)
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="fallback.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    original = page_cls.get_text
+
+    def patched(self, *args, **kwargs):
+        if args and args[0] == "text" and kwargs.get("sort") is True:
+            return ""
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(page_cls, "get_text", patched)
+    monkeypatch.setattr(
+        DoclingParsingProvider,
+        "parse",
+        lambda self, src: pytest.fail("OCR must not run when text is recoverable"),
+    )
+
+    parsed = PyMuPDFParsingProvider().parse(source)
+
+    assert "Recoverable selectable text" in parsed.content
+    assert parsed.metadata["parser"] == "pymupdf"
+    assert parsed.metadata["pages_with_selectable_text"] == "1"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Selective OCR + escalation integration (real PyMuPDF documents)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_quality_aware_mixed_pdf_selective_ocr_preserves_page_order(monkeypatch):
+    # 3-page PDF: page 1 text, page 2 image-only, page 3 text.
+    # ratio 2/3 < 0.9 -> selective OCR on page 2 only; pages stay ordered.
+    pdf = pymupdf.open()
+    page1 = pdf.new_page()
+    page1.insert_text((72, 72), "Page one selectable text")
+    page2 = pdf.new_page()
+    page2.insert_image(
+        pymupdf.Rect(0, 0, page2.rect.width, page2.rect.height),
+        pixmap=page1.get_pixmap(),
+    )
+    page3 = pdf.new_page()
+    page3.insert_text((72, 72), "Page three selectable text")
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="mixed.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    fast = PyMuPDFParsingProvider()
+    ocr = DoclingParsingProvider()
+    parser = QualityAwareDocumentParser(
+        fast_parser=fast, ocr_parser=ocr, selectable_ratio_threshold=0.9
+    )
+
+    # Full Docling parse must NOT run; only selective page OCR.
+    monkeypatch.setattr(
+        DoclingParsingProvider,
+        "parse",
+        lambda self, src: pytest.fail("full Docling parse should not run"),
+    )
+    image_only_pages: list[list[int]] = []
+
+    def fake_selective(self, src, page_numbers):
+        image_only_pages.append(list(page_numbers))
+        return ["Image page two OCR text"]
+
+    monkeypatch.setattr(DoclingParsingProvider, "parse_image_pages", fake_selective)
+
+    parsed = parser.parse(source)
+
+    assert image_only_pages == [[2]]
+    assert "Page one selectable text" in parsed.content
+    assert "Image page two OCR text" in parsed.content
+    assert "Page three selectable text" in parsed.content
+    # Page 1 text precedes the OCR'd page 2 text -> correct ordering.
+    assert parsed.content.index("Page one selectable text") < parsed.content.index(
+        "Image page two OCR text"
+    )
+    assert parsed.metadata["parser"] == "pymupdf"
+    assert parsed.metadata["ocr_applied"] == "selective"
+
+
+def test_quality_aware_scanned_pdf_selective_ocr_failure_escalates_to_full_ocr(
+    monkeypatch,
+):
+    # Single image-only page -> selective OCR returns empty -> full fallback.
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Not selectable")
+    pixmap = page.get_pixmap()
+    pdf.close()
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_image(
+        pymupdf.Rect(0, 0, page.rect.width, page.rect.height), pixmap=pixmap
+    )
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+    source = RawSource(
+        source_type="file",
+        source_identifier="scanned.pdf",
+        content_bytes=pdf_bytes,
+    )
+
+    pipeline = _auto_pipeline_for("pdf")
+    full_parse_calls: list[RawSource] = []
+    selective_calls: list[list[int]] = []
+
+    def fake_full(self, src):
+        full_parse_calls.append(src)
+        return ParsedDocument(
+            title="scanned.pdf",
+            content="Full Docling OCR text for the whole document",
+            sections=["Full Docling OCR text for the whole document"],
+        )
+
+    def fake_selective(self, src, page_numbers):
+        selective_calls.append(list(page_numbers))
+        return [""]  # selective OCR finds nothing -> escalate
+
+    monkeypatch.setattr(DoclingParsingProvider, "parse", fake_full)
+    monkeypatch.setattr(DoclingParsingProvider, "parse_image_pages", fake_selective)
+
+    parsed = pipeline.parser.parse(source)
+
+    # Selective OCR was attempted first...
+    assert selective_calls == [[1]]
+    # ...then a full Docling parse ran as the escalation fallback.
+    assert full_parse_calls == [source]
+    assert parsed.content == "Full Docling OCR text for the whole document"
+    assert parsed.metadata["ocr_applied"] == "true"
+
+
+def test_invalid_selectable_ratio_threshold_is_rejected_at_startup(monkeypatch):
+    monkeypatch.setenv("SELECTABLE_TEXT_RATIO_THRESHOLD", "1.5")
+    with pytest.raises(ValueError, match="0.0 and 1.0"):
+        load_settings()
+
+    monkeypatch.setenv("SELECTABLE_TEXT_RATIO_THRESHOLD", "not-a-number")
+    with pytest.raises(ValueError):
+        load_settings()
+
+    monkeypatch.delenv("SELECTABLE_TEXT_RATIO_THRESHOLD", raising=False)
+    assert load_settings().selectable_text_ratio_threshold == 0.5
+
