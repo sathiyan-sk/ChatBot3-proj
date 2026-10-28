@@ -208,9 +208,26 @@ class DoclingParsingProvider(ParsingContract):
                 format_options[InputFormat.PDF] = PdfFormatOption(
                     pipeline_options=pdf_options
                 )
+
+            docling_artifacts = os.getenv("DOCLING_ARTIFACTS_PATH", "").strip() or None
+            docling_hf_home = os.getenv("HF_HOME", "").strip() or None
+            logger.info(
+                "Docling initialization preconditions: "
+                "artifacts_path=%r hf_home=%r "
+                "artifacts_dir_exists=%s hf_cache_dir_exists=%s "
+                "(a False/None here means the first ingestion in this "
+                "container downloads the layout + OCR models — this is the "
+                "dominant init cost, not OCR compute).",
+                docling_artifacts,
+                docling_hf_home,
+                os.path.isdir(docling_artifacts) if docling_artifacts else False,
+                os.path.isdir(docling_hf_home) if docling_hf_home else False,
+            )
             converter_started_at = time.monotonic()
             logger.info(
-                "Docling converter initialization started: source_type=%s",
+                "Docling converter initialization started "
+                "(includes model load/download; the cold-cache download is "
+                "what makes this step long on a fresh container): source_type=%s",
                 extension,
             )
             converter = DocumentConverter(
