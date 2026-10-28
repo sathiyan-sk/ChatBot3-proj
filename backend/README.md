@@ -182,6 +182,30 @@ extraction per page, which prevents text-based PDFs from being falsely rejected
 as "scanned". This is the recommended mode for mixed text/scanned workloads;
 the default remains `docling` to preserve the no-silent-retry guarantee above.
 
+> **Troubleshooting OCR timeouts:** if a scanned/image-only PDF (e.g. an Aadhaar
+> card scan) hangs at "Docling conversion started" and the ingestion is killed
+> at `INGESTION_TIMEOUT_SECONDS` (default `900`): PyMuPDF correctly determined
+> the page has no selectable text, so the document is routed to Docling full OCR
+> — that part is working as intended. Docling loads a layout-detection model
+> (`ds4sd/docling-layout-detection`, Transformers) and an ONNX OCR model on
+> first use, and the ingestion worker runs that work in a **fresh `spawn`
+> subprocess**, so each cold attempt can re-download/re-load those models.
+> Diagnose which phase the hang occurs in using the existing stage logs:
+> - If the log **stops before** `Docling converter initialization completed` →
+>   the hang is at model import/load/download. Fix: prewarm Docling at deploy
+>   time (run one representative scanned PDF through ingestion once) so the
+>   models populate the shared HuggingFace cache (`~/.cache/huggingface`), or
+>   set `DOCLING_ARTIFACTS_PATH` to a pre-staged artifacts directory. This is
+>   almost always the cause of a single-page doc exceeding the timeout.
+> - If the log **stops after** `Docling document conversion started` (but before
+>   `Docling document conversion returned`) → the hang is model inference, not
+>   download. Lower per-page rasterization cost with `DOCLING_OCR_IMAGE_DPI`
+>   (selective OCR only; default `144`), or reduce `INGESTION_TIMEOUT_SECONDS`
+>   so failures surface faster instead of blocking the worker for the full
+>   window. Lowering the timeout below the typical OCR budget makes slow
+>   documents fail fast with a clear `ingestion_timeout` rather than occupying a
+>   worker; they remain eligible for job-level retry.
+
 Uploaded source objects must live in a **private** Supabase Storage bucket
 (the default bucket name is `data_files`). The backend accesses it with the
 service-role key; do not expose source files through public object URLs. Each
@@ -586,4 +610,40 @@ finalized application structure:
         ├── logging.py
         ├── tracing.py
         └── metrics.py
+
+## Performance: Docling OCR & ingestion timeouts
+
+Ingestion runs in a **fresh `spawn` subprocess** whose lifetime is bounded by
+`INGESTION_TIMEOUT_SECONDS` (default `900`, enforced in
+`app/api/admin/ingestion.py`). On timeout the job is killed and retried up to
+`INGESTION_MAX_ATTEMPTS`. The most common cause of a 900s OCR timeout is
+**Docling downloading/loading its layout + OCR models on first use inside that
+subprocess** (each ingestion gets a clean cache), not a parsing-logic bug.
+
+Mitigations, ordered by impact:
+
+1. **Prewarm Docling models at deploy time.** Run the API once against a
+   representative scanned PDF so HuggingFace caches the layout and OCR models in
+   `~/.cache/huggingface` (or a shared volume mounted at `DOCLING_ARTIFACTS_PATH`).
+   This is the single most effective fix.
+2. `DOCUMENT_PARSER_PROVIDER=auto` (recommended). PyMuPDF extracts the text layer
+   first; Docling OCR runs **only** on image-only pages, so text-based PDFs skip
+   OCR entirely. A fully scanned doc (no text layer at all) still falls back to a
+   full Docling pass.
+3. `DOCLING_SKIP_LAYOUT=1` — for **scanned/image-only PDFs**, skip Docling's
+   layout-detection model: the text is still fully OCR'd but no section/table
+   structure is generated, which removes the slowest CPU stage. Turn this on for
+   ingestion-only workloads that only need searchable text.
+4. `DOCLING_OCR_IMAGE_DPI=144` (lower for large scanned images) — speeds up the
+   selective page-OCR raster step.
+5. `DOCLING_OCR_MODE=skip` disables OCR (OCR-only); `accurate` is slower than
+   `default`. `onnxruntime` is used as the OCR backend.
+6. `INGESTION_TIMEOUT_SECONDS=300` (or similar) to **fail fast** instead of
+   holding a worker for 900s; failed docs are retried automatically.
+7. `MAX_PDF_PAGES` caps how many pages a single doc can contain.
+
+> Note: `DOCLING_SKIP_LAYOUT`, `DOCLING_OCR_IMAGE_DPI`, and
+> `DOCLING_OCR_MODE` only affect the Docling-backed OCR path. The fast PyMuPDF
+> path and `DOCUMENT_PARSER_PROVIDER=native` are unaffected.
+
 MIT

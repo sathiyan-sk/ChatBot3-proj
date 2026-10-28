@@ -136,6 +136,10 @@ class DoclingParsingProvider(ParsingContract):
                 ocr_language = (
                     os.getenv("DOCLING_OCR_LANGUAGE", "en").strip() or "en"
                 )
+                ocr_mode = (
+                    os.getenv("DOCLING_OCR_MODE", self.ocr_mode).strip().lower()
+                    or self.ocr_mode
+                )
                 pdf_pipeline_kwargs: dict = {
                     "artifacts_path": artifacts_path,
                     "layout_options": LayoutObjectDetectionOptions(
@@ -144,12 +148,22 @@ class DoclingParsingProvider(ParsingContract):
                         )
                     ),
                 }
+                if (
+                    os.getenv("DOCLING_SKIP_LAYOUT", "").strip().lower()
+                    in {"1", "true", "yes"}
+                ):
+                    pdf_pipeline_kwargs["do_layout"] = False
+                    logger.info(
+                        "Docling layout detection disabled "
+                        "(DOCLING_SKIP_LAYOUT=1); running OCR without the "
+                        "layout model for faster ingestion of scanned images."
+                    )
                 if self.do_ocr:
                     ocr_mode_value = {
                         "accurate": OcrMode.ACCURATE,
                         "skip": OcrMode.SKIP,
                         "default": OcrMode.DEFAULT,
-                    }.get(self.ocr_mode, OcrMode.DEFAULT)
+                    }.get(ocr_mode, OcrMode.DEFAULT)
                     pdf_pipeline_kwargs["do_ocr"] = True
                     pdf_pipeline_kwargs["ocr_options"] = RapidOcrOptions(
                         backend="onnxruntime",
@@ -272,7 +286,7 @@ class DoclingParsingProvider(ParsingContract):
         self,
         source: RawSource,
         page_numbers: list[int],
-    ) -> str:
+    ) -> list[str]:
         """Run OCR on ONLY the requested (image-only) pages.
 
         This is the selective-OCR hook used by the quality-aware orchestrator:
@@ -308,13 +322,24 @@ class DoclingParsingProvider(ParsingContract):
 
         images: list[tuple[str, bytes]] = []
         try:
+            image_dpi = self.ocr_image_dpi
+            raw_dpi = os.getenv("DOCLING_OCR_IMAGE_DPI")
+            if raw_dpi:
+                try:
+                    image_dpi = int(raw_dpi)
+                except ValueError:
+                    logger.warning(
+                        "Ignored invalid DOCLING_OCR_IMAGE_DPI=%r; using %d.",
+                        raw_dpi,
+                        image_dpi,
+                    )
             with pymupdf.open(
                 stream=BytesIO(source.content_bytes),
                 filetype="pdf",
             ) as pdf:
                 for page_number in page_numbers:
                     page = pdf[page_number - 1]
-                    pixmap = page.get_pixmap(dpi=self.ocr_image_dpi)
+                    pixmap = page.get_pixmap(dpi=image_dpi)
                     images.append(
                         (f"page-{page_number}.png", pixmap.tobytes("png"))
                     )
