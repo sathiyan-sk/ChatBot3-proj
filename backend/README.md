@@ -636,8 +636,12 @@ Mitigations, ordered by impact:
    ingestion-only workloads that only need searchable text.
 4. `DOCLING_OCR_IMAGE_DPI=144` (lower for large scanned images) — speeds up the
    selective page-OCR raster step.
-5. `DOCLING_OCR_MODE=skip` disables OCR (OCR-only); `accurate` is slower than
-   `default`. `onnxruntime` is used as the OCR backend.
+5. `DOCLING_OCR_MODE` selects the OCR input regions for scanned pages. Valid
+   values in Docling 2.118.0: `default` (layout-aware regions — recommended),
+   `full_page`, `layout_regions`, `pdf_aware_layout_regions`. `onnxruntime` is
+   the OCR backend. Note: `skip` is **not** a valid OCR mode here — to disable
+   OCR entirely, use `DOCUMENT_PARSER_PROVIDER=native` (PyMuPDF text
+   extraction, no OCR).
 6. `INGESTION_TIMEOUT_SECONDS=300` (or similar) to **fail fast** instead of
    holding a worker for 900s; failed docs are retried automatically.
 7. `MAX_PDF_PAGES` caps how many pages a single doc can contain.

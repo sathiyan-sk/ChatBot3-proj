@@ -27,6 +27,33 @@ class DoclingParsingProvider(ParsingContract):
     ocr_mode: str = "default"
     ocr_image_dpi: int = 144
 
+    @staticmethod
+    def _resolve_ocr_mode(ocr_mode_enum, requested: str):
+        """Resolve a ``DOCLING_OCR_MODE`` string to an ``OcrMode`` member.
+
+        Docling 2.118.0 removed ``OcrMode.ACCURATE`` and never had an
+        ``OcrMode.SKIP`` member. The previous implementation dereferenced
+        ``OcrMode.ACCURATE`` inside an eagerly-built dict literal, so it raised
+        ``AttributeError`` for *every* document (even
+        ``DOCLING_OCR_MODE=default``), before the env value was ever consulted.
+
+        Members are therefore resolved by name via ``getattr`` (which returns
+        ``None`` instead of raising for absent members) and fall back to
+        ``DEFAULT``. Returns ``None`` only if ``DEFAULT`` is itself absent.
+        """
+        requested = (requested or "default").strip().lower()
+        member = getattr(ocr_mode_enum, requested.upper(), None)
+        if member is not None:
+            return member
+        logger.warning(
+            "Requested Docling OCR mode %r is unavailable in this docling "
+            "version; falling back to DEFAULT. Valid: default, full_page, "
+            "layout_regions, pdf_aware_layout_regions. To disable OCR "
+            "entirely, use DOCUMENT_PARSER_PROVIDER=native.",
+            requested,
+        )
+        return getattr(ocr_mode_enum, "DEFAULT", None)
+
     def parse(self, source: RawSource) -> ParsedDocument:
         if source.content_bytes is None:
             raise ApplicationError(
@@ -159,16 +186,21 @@ class DoclingParsingProvider(ParsingContract):
                         "layout model for faster ingestion of scanned images."
                     )
                 if self.do_ocr:
-                    ocr_mode_value = {
-                        "accurate": OcrMode.ACCURATE,
-                        "skip": OcrMode.SKIP,
-                        "default": OcrMode.DEFAULT,
-                    }.get(ocr_mode, OcrMode.DEFAULT)
+                    ocr_mode_value = self._resolve_ocr_mode(OcrMode, ocr_mode)
+                    rapid_ocr_kwargs: dict = {
+                        "backend": "onnxruntime",
+                        "lang": [ocr_language],
+                    }
+                    if ocr_mode_value is not None:
+                        rapid_ocr_kwargs["mode"] = ocr_mode_value
+                    else:
+                        logger.warning(
+                            "Docling OcrMode has no usable DEFAULT member; "
+                            "relying on RapidOcrOptions built-in default mode."
+                        )
                     pdf_pipeline_kwargs["do_ocr"] = True
                     pdf_pipeline_kwargs["ocr_options"] = RapidOcrOptions(
-                        backend="onnxruntime",
-                        lang=[ocr_language],
-                        mode=ocr_mode_value,
+                        **rapid_ocr_kwargs
                     )
                 pdf_options = PdfPipelineOptions(
                     **pdf_pipeline_kwargs,
