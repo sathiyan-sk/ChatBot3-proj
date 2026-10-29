@@ -86,6 +86,21 @@ class DoclingParsingProvider(ParsingContract):
                     )
         return max(1.0, dpi / 72.0)
 
+    @staticmethod
+    def _resolve_source_extension(source_identifier: str) -> str:
+        """Lowercase extension the ``parse`` format allowlist keys off.
+
+        ``parse`` accepts only ``pdf``/``docx`` uploads, so an identifier that
+        lacks a trailing ``<name>.<ext>`` collapses to a non-allowlisted
+        "extension". This is why the prewarm probe MUST pass a ``.pdf``-suffixed
+        identifier (``prewarm:docling-cache.pdf``): the original bare value
+        ``prewarm:docling-cache`` has no dot, so ``rsplit`` returns the whole
+        string as the "extension" and the parser rejects it with
+        ``docling_format_unsupported``.
+        """
+        source_name = (source_identifier or "").rsplit("/", 1)[-1] or "document"
+        return source_name.rsplit(".", 1)[-1].lower()
+
     def parse(self, source: RawSource) -> ParsedDocument:
         if source.content_bytes is None:
             raise ApplicationError(
@@ -94,8 +109,7 @@ class DoclingParsingProvider(ParsingContract):
                 status_code=422,
             )
 
-        source_name = source.source_identifier.rsplit("/", 1)[-1] or "document"
-        extension = source_name.rsplit(".", 1)[-1].lower()
+        extension = self._resolve_source_extension(source.source_identifier)
         if extension not in {"pdf", "docx"}:
             raise ApplicationError(
                 message=f"Docling parser does not support .{extension} uploads.",

@@ -21,8 +21,8 @@ Cache provisioning model
       .venv/bin/docling-tools models download rapidocr \
           --rapidocr-backend-lang onnxruntime:en -o "$DOCLING_ARTIFACTS_PATH"
 
-  which materializes the ``RapidOCR/PP-OCRv*.onnx`` weights the parse then looks
-  for under ``<artifacts_path>/RapidOCR``. Run it ONCE on the shared volume.
+  which materializes the ``RapidOcr/PP-OCRv*.onnx`` weights the parse then looks
+  for under ``<artifacts_path>/RapidOcr``. Run it ONCE on the shared volume.
 * If ``DOCLING_ARTIFACTS_PATH`` is left unset, Docling falls back to its default
   cache (under ``$HF_HOME``) and auto-downloads on first OCR — but that makes the
   first real Aadhaar pay the download time (the 300s timeout). Prefer the
@@ -64,7 +64,7 @@ def main() -> int:
     provider = DoclingParsingProvider()  # defaults: do_ocr=True, ocr_mode="default"
     source = RawSource(
         source_type="pdf",
-        source_identifier="prewarm:docling-cache",
+        source_identifier="prewarm:docling-cache.pdf",
         content_bytes=pdf_bytes,
         metadata={},
     )

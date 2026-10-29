@@ -12,6 +12,8 @@ import logging
 import pytest
 from enum import Enum
 
+from app.core.exceptions import ApplicationError
+from app.knowledge_engine.shared.models import RawSource
 from app.infrastructure.providers.parsing.docling_provider import (
     DoclingParsingProvider,
 )
@@ -125,3 +127,73 @@ def test_invalid_dpi_falls_back_to_default_with_warning(caplog):
         scale = DoclingParsingProvider._resolve_ocr_image_scale("not-a-number", 144)
     assert scale == 2.0
     assert "invalid" in caplog.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Source extension derivation + parse() format guard
+# ---------------------------------------------------------------------------
+
+
+def test_prewarm_probe_without_pdf_suffix_collapses_to_unsupported_extension():
+    # Regression: the prewarm script originally passed "prewarm:docling-cache"
+    # (no ".pdf" suffix). With no dot, rsplit keeps the entire identifier as
+    # the "extension", so the parser rejected it as docling_format_unsupported.
+    assert (
+        DoclingParsingProvider._resolve_source_extension("prewarm:docling-cache")
+        == "prewarm:docling-cache"
+    )
+
+
+def test_prewarm_probe_with_pdf_suffix_resolves_to_pdf():
+    # The fix: the synthetic probe now carries a trailing .pdf.
+    assert (
+        DoclingParsingProvider._resolve_source_extension("prewarm:docling-cache.pdf")
+        == "pdf"
+    )
+
+
+def test_extension_is_case_insensitive():
+    assert DoclingParsingProvider._resolve_source_extension("scan.PDF") == "pdf"
+    assert DoclingParsingProvider._resolve_source_extension("scan.DocX") == "docx"
+
+
+@pytest.mark.parametrize(
+    "identifier,expected",
+    [
+        ("scan.png", "png"),
+        ("scan.jpg", "jpg"),
+        ("uploads/user/report.pdf", "pdf"),
+        ("noext", "noext"),
+        ("", "document"),  # empty identifier falls back to the provider default name
+    ],
+)
+def test_resolve_source_extension(identifier, expected):
+    assert DoclingParsingProvider._resolve_source_extension(identifier) == expected
+
+
+def test_parse_rejects_prewarm_probe_without_extension():
+    # Exercises the parse() guard only (raises before the lazy Docling import /
+    # pymupdf, so it runs without native deps installed).
+    provider = DoclingParsingProvider()
+    source = RawSource(
+        source_type="pdf",
+        source_identifier="prewarm:docling-cache",  # the original, buggy value
+        content_bytes=b"%PDF-1.4 synthetic prewarm page",
+    )
+    with pytest.raises(ApplicationError) as exc:
+        provider.parse(source)
+    assert exc.value.code == "docling_format_unsupported"
+    assert "prewarm:docling-cache" in exc.value.message
+
+
+def test_parse_rejects_disallowed_extension():
+    provider = DoclingParsingProvider()
+    source = RawSource(
+        source_type="pdf",
+        source_identifier="scan.png",
+        content_bytes=b"\x89PNG\r\n\x1a\n synthetic bytes",
+    )
+    with pytest.raises(ApplicationError) as exc:
+        provider.parse(source)
+    assert exc.value.code == "docling_format_unsupported"
+    assert ".png" in exc.value.message
