@@ -35,7 +35,7 @@ def _tiny_image_only_pdf() -> bytes:
     # and Docling OCR is exercised end-to-end.
     page.draw_rect(rect=pymupdf.Rect(10, 10, 290, 290),
                     color=(0.2, 0.2, 0.2), fill=(0.55, 0.55, 0.55))
-    page.draw_circle(point=(150, 150), radius=60, color=(0.1, 0.1, 0.1),
+    page.draw_circle(center=(150, 150), radius=60, color=(0.1, 0.1, 0.1),
                      fill=(0.85, 0.85, 0.85))
     data = doc.save()
     doc.close()
