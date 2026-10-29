@@ -43,15 +43,27 @@ from app.infrastructure.providers.parsing.docling_provider import DoclingParsing
 
 
 def _tiny_image_only_pdf() -> bytes:
-    """A 1-page PDF with *no* text layer — forces the Docling OCR path to run."""
+    """A 1-page image-only PDF (no selectable text layer) to warm the cache.
+
+    The glyph string is rasterized to a pixmap and stamped as an image, so the
+    PyMuPDF fast path yields 0 selectable chars and Docling image OCR runs for
+    real (exercising the RapidOCR weights + scale selection) while still
+    producing non-empty markdown.
+    """
     doc = pymupdf.open()
-    page = doc.new_page(width=300, height=300)
-    # Gray shapes (not selectable text) so PyMuPDF fast path yields 0 chars
-    # and Docling OCR is exercised end-to-end.
-    page.draw_rect(rect=pymupdf.Rect(10, 10, 290, 290),
-                    color=(0.2, 0.2, 0.2), fill=(0.55, 0.55, 0.55))
-    page.draw_circle(center=(150, 150), radius=60, color=(0.1, 0.1, 0.1),
-                     fill=(0.85, 0.85, 0.85))
+    page = doc.new_page(width=400, height=200)
+
+    scratch = pymupdf.open()
+    scratch_page = scratch.new_page(width=340, height=110)
+    scratch_page.insert_text(
+        (20, 70), "OCR-CALIBRATION 0123 4567", fontsize=36, color=(0, 0, 0),
+    )
+    # Rasterize at scale 2.0 (144 DPI) to match the configured OCR raster DPI.
+    pixmap = scratch_page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
+    page.insert_image(page.rect, pixmap=pixmap)
+    pixmap = None
+    scratch.close()
+
     data = doc.tobytes()
     doc.close()
     return data

@@ -109,6 +109,7 @@ class DoclingParsingProvider(ParsingContract):
                 status_code=422,
             )
 
+        source_name = source.source_identifier.rsplit("/", 1)[-1] or "document"
         extension = self._resolve_source_extension(source.source_identifier)
         if extension not in {"pdf", "docx"}:
             raise ApplicationError(
