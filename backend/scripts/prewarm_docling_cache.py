@@ -23,6 +23,11 @@ Cache provisioning model
 
   which materializes the ``RapidOcr/PP-OCRv*.onnx`` weights the parse then looks
   for under ``<artifacts_path>/RapidOcr``. Run it ONCE on the shared volume.
+
+  For scanned/image-only PDFs (e.g. Aadhaar cards), also set DOCLING_SKIP_LAYOUT=1:
+  Docling then skips the ``docling-project/docling-layout-heron`` model and runs
+  OCR only, so only the RapidOCR weights above need preloading (no layout model
+  download required).
 * If ``DOCLING_ARTIFACTS_PATH`` is left unset, Docling falls back to its default
   cache (under ``$HF_HOME``) and auto-downloads on first OCR — but that makes the
   first real Aadhaar pay the download time (the 300s timeout). Prefer the
@@ -34,6 +39,7 @@ from __future__ import annotations
 
 import io
 import os
+import pathlib
 import sys
 
 import pymupdf  # PyMuPDF; available wherever Docling OCR runs
@@ -69,7 +75,44 @@ def _tiny_image_only_pdf() -> bytes:
     return data
 
 
+def _preflight_cache() -> None:
+    """Fail fast with an actionable message instead of a 300s timeout wait.
+
+    The Docling cold-start error (missing ``docling-layout-heron``) is a config
+    problem, not a code problem. Surface it here so a botched env is diagnosed
+    in milliseconds rather than reproduced as an INGESTION_TIMEOUT_SECONDS abort.
+    """
+    artifacts_path = os.getenv("DOCLING_ARTIFACTS_PATH", "").strip() or None
+    if not artifacts_path:
+        print("prewarm: ERROR DOCLING_ARTIFACTS_PATH is unset; set it to the "
+              "shared cache dir (e.g. /var/lib/docling/artifacts).")
+        sys.exit(2)
+    if not os.path.isdir(artifacts_path):
+        print(f"prewarm: ERROR artifacts_path={artifacts_path!r} does not exist.")
+        sys.exit(2)
+    rapidocr_dir = os.path.join(artifacts_path, "RapidOcr")
+    weights = sorted(pathlib.Path(rapidocr_dir).glob("PP-OCRv*.onnx"))
+    if len(weights) < 3:
+        print(f"prewarm: ERROR only {len(weights)} RapidOCR weight(s) found in "
+              f"{rapidocr_dir!r}; prefetch with "
+              "`docling-tools models download rapidocr "
+              "--rapidocr-backend-lang onnxruntime:en -o \"$DOCLING_ARTIFACTS_PATH\"` "
+              "and retry.")
+        sys.exit(2)
+    print(f"preflight: OK artifacts_path={artifacts_path!r} "
+          f"rapidocr_weights={len(weights)}")
+    skip_layout = os.getenv("DOCLING_SKIP_LAYOUT", "").strip().lower()
+    if skip_layout in ("", "0", "false"):
+        print("preflight: WARNING DOCLING_SKIP_LAYOUT unset -> Docling will try to "
+              "load docling-project/docling-layout-heron, which is NOT in the shared "
+              "cache and will reproduce the 300s timeout-to-FileNotFoundError. Set "
+              "DOCLING_SKIP_LAYOUT=1 (recommended for scanned/image-only PDFs).")
+    else:
+        print("preflight: OK layout model skipped (DOCLING_SKIP_LAYOUT=1).")
+
+
 def main() -> int:
+    _preflight_cache()
     pdf_bytes = _tiny_image_only_pdf()
     print(f"prewarm: synthetic image-only PDF built, bytes={len(pdf_bytes)}")
 
