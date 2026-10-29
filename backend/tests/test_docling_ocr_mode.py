@@ -8,6 +8,8 @@ removed the legacy ``ACCURATE`` member and never had a ``SKIP`` member.
 """
 
 import logging
+
+import pytest
 from enum import Enum
 
 from app.infrastructure.providers.parsing.docling_provider import (
@@ -90,3 +92,36 @@ def test_case_insensitive_lookup():
         DoclingParsingProvider._resolve_ocr_mode(_FakeOcrMode, "Full_Page")
         is _FakeOcrMode.FULL_PAGE
     )
+
+
+def test_default_dpi_maps_to_intended_144dpi_scale():
+    # The .env.example operating point (144 DPI) must map to scale 2.0, which
+    # reproduces Docling's onnxruntime default for the *selective* OCR path and
+    # is BELOW docling's full-path default of scale 3.0 (= 216 DPI).
+    assert DoclingParsingProvider._resolve_ocr_image_scale(None, 144) == 2.0
+    assert DoclingParsingProvider._resolve_ocr_image_scale("", 144) == 2.0
+
+
+@pytest.mark.parametrize(
+    "dpi,expected",
+    [
+        (72, 1.0),    # 72 DPI == scale 1.0 (minimum, not downscaled)
+        (108, 1.5),
+        (144, 2.0),
+        (216, 3.0),   # == docling's hardcoded default (216 DPI)
+    ],
+)
+def test_dpi_to_scale_mapping(dpi, expected):
+    assert DoclingParsingProvider._resolve_ocr_image_scale(str(dpi), 144) == expected
+
+
+def test_dpi_below_one_dpi_is_clamped_to_one_to_avoid_sub_72_dpi():
+    # 36/72 == 0.5 -> must NOT downscale below 72 DPI (recognition degrades).
+    assert DoclingParsingProvider._resolve_ocr_image_scale("36", 144) == 1.0
+
+
+def test_invalid_dpi_falls_back_to_default_with_warning(caplog):
+    with caplog.at_level(logging.WARNING):
+        scale = DoclingParsingProvider._resolve_ocr_image_scale("not-a-number", 144)
+    assert scale == 2.0
+    assert "invalid" in caplog.text.lower()

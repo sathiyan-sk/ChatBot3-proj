@@ -54,6 +54,38 @@ class DoclingParsingProvider(ParsingContract):
         )
         return getattr(ocr_mode_enum, "DEFAULT", None)
 
+    @staticmethod
+    def _resolve_ocr_image_scale(
+        requested_dpi_env: str | None, default_dpi: int
+    ) -> float:
+        """Map ``DOCLING_OCR_IMAGE_DPI`` to ``RapidOcrOptions.scale``.
+
+        Docling renders each OCR page at ``72 DPI * scale`` (see docling
+        ``OcrOptions.scale``, default ``3.0`` -> 216 DPI). The full Docling path
+        previously ignored ``DOCLING_OCR_IMAGE_DPI`` and OCR'd every scanned
+        page at 216 DPI, which is the single biggest CPU cost on Aadhaar-style
+        card scans. Passing ``scale = dpi / 72`` fixes that and reproduces the
+        144 DPI operating point declared in ``.env.example`` (144/72 == 2.0).
+
+        - 144 DPI (scale 2.0) is the default and is the intended point for
+          card text; lower it (e.g. 100 -> ~1.39) to cut time on huge scans.
+        - Scales below ~72 DPI would downscale below 72 DPI and hurt
+          recognition, so the result is clamped at a minimum of 1.0.
+        """
+        dpi = default_dpi
+        if requested_dpi_env:
+            requested_dpi_env = requested_dpi_env.strip()
+            if requested_dpi_env:
+                try:
+                    dpi = int(float(requested_dpi_env))
+                except ValueError:
+                    logger.warning(
+                        "Invalid DOCLING_OCR_IMAGE_DPI=%r; using %d.",
+                        requested_dpi_env,
+                        default_dpi,
+                    )
+        return max(1.0, dpi / 72.0)
+
     def parse(self, source: RawSource) -> ParsedDocument:
         if source.content_bytes is None:
             raise ApplicationError(
@@ -167,6 +199,16 @@ class DoclingParsingProvider(ParsingContract):
                     os.getenv("DOCLING_OCR_MODE", self.ocr_mode).strip().lower()
                     or self.ocr_mode
                 )
+                ocr_scale = self._resolve_ocr_image_scale(
+                    os.getenv("DOCLING_OCR_IMAGE_DPI"), self.ocr_image_dpi
+                )
+                logger.info(
+                    "Docling OCR raster scale: DOCLING_OCR_IMAGE_DPI -> "
+                    "scale=%.2f (~%d DPI; 72 DPI * scale). "
+                    "Lower the DPI env var to cut OCR time on large scans.",
+                    ocr_scale,
+                    int(round(ocr_scale * 72)),
+                )
                 pdf_pipeline_kwargs: dict = {
                     "artifacts_path": artifacts_path,
                     "layout_options": LayoutObjectDetectionOptions(
@@ -190,6 +232,7 @@ class DoclingParsingProvider(ParsingContract):
                     rapid_ocr_kwargs: dict = {
                         "backend": "onnxruntime",
                         "lang": [ocr_language],
+                        "scale": ocr_scale,
                     }
                     if ocr_mode_value is not None:
                         rapid_ocr_kwargs["mode"] = ocr_mode_value

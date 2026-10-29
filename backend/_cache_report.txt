@@ -1,0 +1,370 @@
+HF_DEFAULT_HOME = C:\Users\☬ᕼᗩᑕKEᏒ༒\.cache\huggingface
+HF_DEFAULT_HUB_CACHE = C:\Users\☬ᕼᗩᑕKEᏒ༒\.cache\huggingface\hub
+
+=== artifacts_path references in installed docling ===
+document_converter.py:429: RuntimeError: If `artifacts_path` is set in
+cli\main.py:903: artifacts_path: Annotated[
+cli\main.py:1271: if artifacts_path is not None:
+cli\main.py:1272: simple_format_option.artifacts_path = artifacts_path
+cli\main.py:1373: # artifacts_path = artifacts_path
+cli\main.py:1430: if artifacts_path is not None:
+cli\main.py:1431: pipeline_options.artifacts_path = artifacts_path
+cli\main.py:1432: asr_pipeline_options.artifacts_path = artifacts_path
+datamodel\pipeline_options.py:411: Use the pipeline-level `artifacts_path` to point to pre-downloaded checkpoint artifacts.
+datamodel\pipeline_options.py:1281: artifacts_path: Annotated[
+datamodel\settings.py:68: artifacts_path: Optional[Path] = None
+experimental\models\table_crops_layout_model.py:33: artifacts_path: Optional[Path],
+experimental\models\table_crops_layout_model.py:40: self.artifacts_path = artifacts_path
+experimental\pipeline\threaded_layout_vlm_pipeline.py:89: art_path = self._resolve_artifacts_path()
+experimental\pipeline\threaded_layout_vlm_pipeline.py:97: artifacts_path=art_path,
+experimental\pipeline\threaded_layout_vlm_pipeline.py:187: artifacts_path=art_path,
+experimental\pipeline\threaded_layout_vlm_pipeline.py:194: artifacts_path=art_path,
+experimental\pipeline\threaded_layout_vlm_pipeline.py:203: artifacts_path=art_path,
+experimental\pipeline\threaded_layout_vlm_pipeline.py:214: def _resolve_artifacts_path(self) -> Optional[Path]:
+experimental\pipeline\threaded_layout_vlm_pipeline.py:216: if self.pipeline_options.artifacts_path:
+experimental\pipeline\threaded_layout_vlm_pipeline.py:217: p = Path(self.pipeline_options.artifacts_path).expanduser()
+experimental\pipeline\threaded_layout_vlm_pipeline.py:218: elif settings.artifacts_path:
+experimental\pipeline\threaded_layout_vlm_pipeline.py:219: p = Path(settings.artifacts_path).expanduser()
+models\base_ocr_model.py:52: artifacts_path: Path | None,
+models\picture_description_base_model.py:42: artifacts_path: Optional[Union[Path, str]],
+models\extraction\nuextract_transformers_model.py:112: artifacts_path: Optional[Path],
+models\extraction\nuextract_transformers_model.py:133: if artifacts_path is None:
+models\extraction\nuextract_transformers_model.py:134: artifacts_path = self.download_models(
+models\extraction\nuextract_transformers_model.py:138: elif (artifacts_path / repo_cache_folder).exists():
+models\extraction\nuextract_transformers_model.py:139: artifacts_path = artifacts_path / repo_cache_folder
+models\extraction\nuextract_transformers_model.py:142: artifacts_path,
+models\extraction\nuextract_transformers_model.py:149: artifacts_path,
+models\extraction\nuextract_transformers_model.py:166: self.generation_config = GenerationConfig.from_pretrained(artifacts_path)
+models\extraction\transformers_extraction_model.py:35: artifacts_path: Optional[Path],
+models\extraction\transformers_extraction_model.py:59: if artifacts_path is None:
+models\extraction\transformers_extraction_model.py:60: artifacts_path = self.download_models(
+models\extraction\transformers_extraction_model.py:64: elif (artifacts_path / repo_cache_folder).exists():
+models\extraction\transformers_extraction_model.py:65: artifacts_path = artifacts_path / repo_cache_folder
+models\extraction\transformers_extraction_model.py:79: artifacts_path,
+models\extraction\transformers_extraction_model.py:84: artifacts_path,
+models\extraction\transformers_extraction_model.py:111: artifacts_path
+models\inference_engines\common\hf_vision_base.py:13: from docling.models.inference_engines.vlm._utils import resolve_model_artifacts_path
+models\inference_engines\common\hf_vision_base.py:32: artifacts_path: Optional[Union[Path, str]],
+models\inference_engines\common\hf_vision_base.py:43: self._artifacts_path = (
+models\inference_engines\common\hf_vision_base.py:44: artifacts_path if artifacts_path is None else Path(artifacts_path)
+models\inference_engines\common\hf_vision_base.py:51: """Resolve model folder from artifacts_path or HF download."""
+models\inference_engines\common\hf_vision_base.py:68: return resolve_model_artifacts_path(
+models\inference_engines\common\hf_vision_base.py:71: artifacts_path=self._artifacts_path,
+models\inference_engines\image_classification\api_kserve_v2_engine.py:42: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\image_classification\api_kserve_v2_engine.py:48: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\factory.py:28: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\image_classification\factory.py:52: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\factory.py:73: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\factory.py:95: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\hf_base.py:34: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\image_classification\hf_base.py:41: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\onnxruntime_engine.py:42: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\image_classification\onnxruntime_engine.py:49: artifacts_path=artifacts_path,
+models\inference_engines\image_classification\onnxruntime_engine.py:58: """Resolve model artifacts from artifacts_path or HF download."""
+models\inference_engines\image_classification\transformers_engine.py:44: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\image_classification\transformers_engine.py:51: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\api_kserve_v2_engine.py:43: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\object_detection\api_kserve_v2_engine.py:49: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\factory.py:31: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\object_detection\factory.py:40: artifacts_path: Optional path to local model artifacts root
+models\inference_engines\object_detection\factory.py:65: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\factory.py:86: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\factory.py:107: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\hf_base.py:30: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\object_detection\hf_base.py:37: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\onnxruntime_engine.py:47: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\object_detection\onnxruntime_engine.py:54: artifacts_path: Path to cached model artifacts
+models\inference_engines\object_detection\onnxruntime_engine.py:61: artifacts_path=artifacts_path,
+models\inference_engines\object_detection\onnxruntime_engine.py:68: """Resolve model artifacts from artifacts_path or HF download.
+models\inference_engines\object_detection\transformers_engine.py:48: artifacts_path: Optional[Union[Path, str]] = None,
+models\inference_engines\object_detection\transformers_engine.py:56: artifacts_path: Path to cached model artifacts
+models\inference_engines\object_detection\transformers_engine.py:62: artifacts_path=artifacts_path,
+models\inference_engines\vlm\auto_inline_engine.py:46: artifacts_path: Union[Path, str] | None,
+models\inference_engines\vlm\auto_inline_engine.py:54: artifacts_path: Path to cached model artifacts
+models\inference_engines\vlm\auto_inline_engine.py:60: self.artifacts_path = artifacts_path
+models\inference_engines\vlm\auto_inline_engine.py:186: artifacts_path=self.artifacts_path,
+models\inference_engines\vlm\auto_inline_engine.py:199: artifacts_path=self.artifacts_path,
+models\inference_engines\vlm\auto_inline_engine.py:214: artifacts_path=self.artifacts_path,
+models\inference_engines\vlm\factory.py:32: artifacts_path: Optional[Union[Path, str]],
+models\inference_engines\vlm\factory.py:74: artifacts_path=artifacts_path,
+models\inference_engines\vlm\factory.py:91: artifacts_path=artifacts_path,
+models\inference_engines\vlm\factory.py:102: options, model_config=model_config, artifacts_path=artifacts_path
+models\inference_engines\vlm\factory.py:114: artifacts_path=artifacts_path,
+models\inference_engines\vlm\mlx_engine.py:49: artifacts_path: Union[Path, str] | None,
+models\inference_engines\vlm\mlx_engine.py:56: artifacts_path: Path to cached model artifacts
+models\inference_engines\vlm\mlx_engine.py:61: self.artifacts_path = (
+models\inference_engines\vlm\mlx_engine.py:62: artifacts_path if artifacts_path is None else Path(artifacts_path)
+models\inference_engines\vlm\mlx_engine.py:120: if self.artifacts_path is None:
+models\inference_engines\vlm\mlx_engine.py:121: artifacts_path = self.download_models(repo_id, revision=revision)
+models\inference_engines\vlm\mlx_engine.py:122: elif (self.artifacts_path / repo_cache_folder).exists():
+models\inference_engines\vlm\mlx_engine.py:123: artifacts_path = self.artifacts_path / repo_cache_folder
+models\inference_engines\vlm\mlx_engine.py:125: # Model not found in artifacts_path - raise clear error
+models\inference_engines\vlm\mlx_engine.py:127: if self.artifacts_path.exists():
+models\inference_engines\vlm\mlx_engine.py:129: p.name for p in self.artifacts_path.iterdir() if p.is_dir()
+models\inference_engines\vlm\mlx_engine.py:133: f"Model '{repo_id}' not found in artifacts_path.\n"
+models\inference_engines\vlm\mlx_engine.py:134: f"Expected location: {self.artifacts_path / repo_cache_folder}\n"
+models\inference_engines\vlm\mlx_engine.py:135: f"Available models in {self.artifacts_path}: "
+models\inference_engines\vlm\mlx_engine.py:140: f"  3. Or use a different model that exists in your artifacts_path"
+models\inference_engines\vlm\mlx_engine.py:144: self.vlm_model, self.processor = load(artifacts_path)
+models\inference_engines\vlm\mlx_engine.py:145: self.config = load_config(artifacts_path)
+models\inference_engines\vlm\transformers_engine.py:35: resolve_model_artifacts_path,
+models\inference_engines\vlm\transformers_engine.py:84: artifacts_path: Union[Path, str] | None,
+models\inference_engines\vlm\transformers_engine.py:92: artifacts_path: Path to cached model artifacts
+models\inference_engines\vlm\transformers_engine.py:98: self.artifacts_path = artifacts_path
+models\inference_engines\vlm\transformers_engine.py:195: artifacts_path = resolve_model_artifacts_path(
+models\inference_engines\vlm\transformers_engine.py:198: artifacts_path=self.artifacts_path,
+models\inference_engines\vlm\transformers_engine.py:224: artifacts_path,
+models\inference_engines\vlm\transformers_engine.py:255: artifacts_path,
+models\inference_engines\vlm\transformers_engine.py:282: artifacts_path, revision=revision
+models\inference_engines\vlm\vllm_engine.py:15: resolve_model_artifacts_path,
+models\inference_engines\vlm\vllm_engine.py:93: artifacts_path: Union[Path, str] | None,
+models\inference_engines\vlm\vllm_engine.py:101: artifacts_path: Path to cached model artifacts
+models\inference_engines\vlm\vllm_engine.py:107: self.artifacts_path = artifacts_path
+models\inference_engines\vlm\vllm_engine.py:175: artifacts_path = resolve_model_artifacts_path(
+models\inference_engines\vlm\vllm_engine.py:178: artifacts_path=self.artifacts_path,
+models\inference_engines\vlm\vllm_engine.py:201: "model": str(artifacts_path),
+models\inference_engines\vlm\vllm_engine.py:236: artifacts_path,
+models\inference_engines\vlm\_utils.py:93: def resolve_model_artifacts_path(
+models\inference_engines\vlm\_utils.py:96: artifacts_path: Optional[Union[Path, str]],
+models\inference_engines\vlm\_utils.py:107: artifacts_path: Optional path to cached artifacts directory
+models\inference_engines\vlm\_utils.py:114: FileNotFoundError: If artifacts_path is provided but model not found
+models\inference_engines\vlm\_utils.py:118: artifacts_path = artifacts_path if artifacts_path is None else Path(artifacts_path)
+models\inference_engines\vlm\_utils.py:120: if artifacts_path is None:
+models\inference_engines\vlm\_utils.py:123: elif (artifacts_path / repo_cache_folder).exists():
+models\inference_engines\vlm\_utils.py:125: return artifacts_path / repo_cache_folder
+models\inference_engines\vlm\_utils.py:127: # Model not found in artifacts_path - raise clear error
+models\inference_engines\vlm\_utils.py:129: if artifacts_path.exists():
+models\inference_engines\vlm\_utils.py:130: available_models = [p.name for p in artifacts_path.iterdir() if p.is_dir()]
+models\inference_engines\vlm\_utils.py:133: f"Model '{repo_id}' not found in artifacts_path.\n"
+models\inference_engines\vlm\_utils.py:134: f"Expected location: {artifacts_path / repo_cache_folder}\n"
+models\inference_engines\vlm\_utils.py:135: f"Available models in {artifacts_path}: "
+models\inference_engines\vlm\_utils.py:140: f"  3. Or use a different model that exists in your artifacts_path"
+models\stages\chart_extraction\granite_vision.py:51: artifacts_path: Optional[Path],
+models\stages\chart_extraction\granite_vision.py:65: if artifacts_path is None:
+models\stages\chart_extraction\granite_vision.py:66: artifacts_path = self.download_models()
+models\stages\chart_extraction\granite_vision.py:67: elif (artifacts_path / self._model_repo_folder).exists():
+models\stages\chart_extraction\granite_vision.py:68: artifacts_path = artifacts_path / self._model_repo_folder
+models\stages\chart_extraction\granite_vision.py:71: f"Model artifacts not found at {artifacts_path / self._model_repo_folder}, they will be downloaded."
+models\stages\chart_extraction\granite_vision.py:74: self._load_model(artifacts_path)
+models\stages\chart_extraction\granite_vision.py:77: def _load_model(self, artifacts_path: Path) -> None:
+models\stages\chart_extraction\granite_vision.py:200: def _load_model(self, artifacts_path: Path) -> None:
+models\stages\chart_extraction\granite_vision.py:204: artifacts_path,
+models\stages\chart_extraction\granite_vision.py:209: artifacts_path,
+models\stages\chart_extraction\granite_vision.py:348: def _load_model(self, artifacts_path: Path) -> None:
+models\stages\chart_extraction\granite_vision.py:365: artifacts_path,
+models\stages\chart_extraction\granite_vision.py:370: artifacts_path,
+models\stages\code_formula\code_formula_model.py:59: __init__(self, enabled, artifacts_path, accelerator_options, code_formula_options)
+models\stages\code_formula\code_formula_model.py:75: artifacts_path: Optional[Path],
+models\stages\code_formula\code_formula_model.py:86: artifacts_path : Path
+models\stages\code_formula\code_formula_model.py:106: if artifacts_path is None:
+models\stages\code_formula\code_formula_model.py:107: artifacts_path = self.download_models()
+models\stages\code_formula\code_formula_model.py:109: artifacts_path = artifacts_path / self._model_repo_folder
+models\stages\code_formula\code_formula_model.py:114: artifacts_path,
+models\stages\code_formula\code_formula_model.py:118: artifacts_path, device_map=self.device
+models\stages\code_formula\code_formula_vlm_model.py:60: artifacts_path=None,
+models\stages\code_formula\code_formula_vlm_model.py:75: artifacts_path: Optional[Union[Path, str]],
+models\stages\code_formula\code_formula_vlm_model.py:83: artifacts_path: Path to model artifacts (optional)
+models\stages\code_formula\code_formula_vlm_model.py:110: artifacts_path=artifacts_path,
+models\stages\layout\layout_model.py:61: artifacts_path: Optional[Path],
+models\stages\layout\layout_model.py:73: artifacts_path=artifacts_path,
+models\stages\layout\layout_object_detection_model.py:35: artifacts_path: Optional[Path],
+models\stages\layout\layout_object_detection_model.py:45: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:31: artifacts_path: Optional[Path],
+models\stages\ocr\auto_ocr_model.py:37: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:51: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:69: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:88: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:107: artifacts_path=artifacts_path,
+models\stages\ocr\auto_ocr_model.py:124: artifacts_path=artifacts_path,
+models\stages\ocr\easyocr_model.py:79: artifacts_path: Optional[Path],
+models\stages\ocr\easyocr_model.py:85: artifacts_path=artifacts_path,
+models\stages\ocr\easyocr_model.py:123: if artifacts_path is not None and model_storage_directory is None:
+models\stages\ocr\easyocr_model.py:125: model_storage_directory = str(artifacts_path / self._model_repo_folder)
+models\stages\ocr\kserve_v2_ocr_model.py:49: artifacts_path: Optional[Path],
+models\stages\ocr\kserve_v2_ocr_model.py:58: artifacts_path: Path to model artifacts (not used for remote inference).
+models\stages\ocr\kserve_v2_ocr_model.py:64: artifacts_path=artifacts_path,
+models\stages\ocr\nemotron_ocr_model.py:112: artifacts_path: Optional[Path],
+models\stages\ocr\nemotron_ocr_model.py:118: artifacts_path=artifacts_path,
+models\stages\ocr\nemotron_ocr_model.py:145: model_dir = self._resolve_model_dir(language, artifacts_path=artifacts_path)
+models\stages\ocr\nemotron_ocr_model.py:192: self, language: str, artifacts_path: Optional[Path]
+models\stages\ocr\nemotron_ocr_model.py:194: if artifacts_path is None:
+models\stages\ocr\nemotron_ocr_model.py:198: artifacts_path
+models\stages\ocr\nemotron_ocr_model.py:208: if artifacts_path.exists():
+models\stages\ocr\nemotron_ocr_model.py:210: path.name for path in artifacts_path.iterdir() if path.is_dir()
+models\stages\ocr\nemotron_ocr_model.py:214: "Nemotron OCR artifacts not found or incomplete in artifacts_path.\n"
+models\stages\ocr\nemotron_ocr_model.py:217: f"Available directories in {artifacts_path}: {available_dirs}\n"
+models\stages\ocr\nemotron_ocr_model.py:219: "the checkpoints or unset artifacts_path to allow the upstream "
+models\stages\ocr\ocr_mac_model.py:29: artifacts_path: Optional[Path],
+models\stages\ocr\ocr_mac_model.py:35: artifacts_path=artifacts_path,
+models\stages\ocr\rapid_ocr_model.py:262: artifacts_path: Path | None,
+models\stages\ocr\rapid_ocr_model.py:268: artifacts_path=artifacts_path,
+models\stages\ocr\rapid_ocr_model.py:338: # Params forwarded to RapidOCR only in the library-managed flow (no artifacts_path)
+models\stages\ocr\rapid_ocr_model.py:341: if artifacts_path is not None:
+models\stages\ocr\rapid_ocr_model.py:342: # artifacts_path means fully-offline operation
+models\stages\ocr\rapid_ocr_model.py:343: target_dir = artifacts_path / self._model_repo_folder
+models\stages\ocr\rapid_ocr_model.py:363: "RapidOCR artifacts not found or incomplete in artifacts_path.\n"
+models\stages\ocr\rapid_ocr_model.py:371: f"-o {artifacts_path}\n"
+models\stages\ocr\rapid_ocr_model.py:372: "Or unset artifacts_path to let RapidOCR resolve and download "
+models\stages\ocr\tesseract_ocr_cli_model.py:43: artifacts_path: Optional[Path],
+models\stages\ocr\tesseract_ocr_cli_model.py:49: artifacts_path=artifacts_path,
+models\stages\ocr\tesseract_ocr_model.py:33: artifacts_path: Optional[Path],
+models\stages\ocr\tesseract_ocr_model.py:39: artifacts_path=artifacts_path,
+models\stages\picture_classifier\document_picture_classifier.py:57: __init__(enabled, artifacts_path, options, accelerator_options)
+models\stages\picture_classifier\document_picture_classifier.py:70: artifacts_path: Optional[Path],
+models\stages\picture_classifier\document_picture_classifier.py:82: artifacts_path : Optional[Union[Path, str]],
+models\stages\picture_classifier\document_picture_classifier.py:98: artifacts_path=artifacts_path,
+models\stages\picture_description\picture_description_api_model.py:30: artifacts_path: Optional[Union[Path, str]],
+models\stages\picture_description\picture_description_api_model.py:37: artifacts_path=artifacts_path,
+models\stages\picture_description\picture_description_vlm_engine_model.py:53: artifacts_path=None,
+models\stages\picture_description\picture_description_vlm_engine_model.py:68: artifacts_path: Optional[Union[Path, str]],
+models\stages\picture_description\picture_description_vlm_engine_model.py:75: artifacts_path=artifacts_path,
+models\stages\picture_description\picture_description_vlm_engine_model.py:101: artifacts_path=artifacts_path,
+models\stages\picture_description\picture_description_vlm_model.py:35: artifacts_path: Optional[Union[Path, str]],
+models\stages\picture_description\picture_description_vlm_model.py:42: artifacts_path=artifacts_path,
+models\stages\picture_description\picture_description_vlm_model.py:49: if artifacts_path is None:
+models\stages\picture_description\picture_description_vlm_model.py:50: artifacts_path = self.download_models(repo_id=self.options.repo_id)
+models\stages\picture_description\picture_description_vlm_model.py:52: artifacts_path = Path(artifacts_path) / self.options.repo_cache_folder
+models\stages\picture_description\picture_description_vlm_model.py:69: self.processor = AutoProcessor.from_pretrained(artifacts_path)
+models\stages\picture_description\picture_description_vlm_model.py:74: artifacts_path,
+models\stages\table_structure\table_structure_model.py:39: artifacts_path: Optional[Path],
+models\stages\table_structure\table_structure_model.py:50: if artifacts_path is None:
+models\stages\table_structure\table_structure_model.py:51: artifacts_path = self.download_models() / self._model_path
+models\stages\table_structure\table_structure_model.py:54: if (artifacts_path / self._model_repo_folder).exists():
+models\stages\table_structure\table_structure_model.py:55: artifacts_path = (
+models\stages\table_structure\table_structure_model.py:56: artifacts_path / self._model_repo_folder / self._model_path
+models\stages\table_structure\table_structure_model.py:58: elif (artifacts_path / self._model_path).exists():
+models\stages\table_structure\table_structure_model.py:60: "The usage of artifacts_path containing directly "
+models\stages\table_structure\table_structure_model.py:62: "the artifacts_path to the parent containing "
+models\stages\table_structure\table_structure_model.py:67: artifacts_path = artifacts_path / self._model_path
+models\stages\table_structure\table_structure_model.py:70: artifacts_path = artifacts_path / "accurate"
+models\stages\table_structure\table_structure_model.py:72: artifacts_path = artifacts_path / "fast"
+models\stages\table_structure\table_structure_model.py:86: self.tm_config = c.read_config(f"{artifacts_path}/tm_config.json")
+models\stages\table_structure\table_structure_model.py:87: self.tm_config["model"]["save_dir"] = artifacts_path
+models\stages\table_structure\table_structure_model_granite_vision.py:150: artifacts_path: Path | None,
+models\stages\table_structure\table_structure_model_granite_vision.py:165: if artifacts_path is None:
+models\stages\table_structure\table_structure_model_granite_vision.py:166: artifacts_path = self.download_models()
+models\stages\table_structure\table_structure_model_granite_vision.py:167: elif (artifacts_path / self._model_repo_folder).exists():
+models\stages\table_structure\table_structure_model_granite_vision.py:168: artifacts_path = artifacts_path / self._model_repo_folder
+models\stages\table_structure\table_structure_model_granite_vision.py:171: f"Model artifacts not found at {artifacts_path / self._model_repo_folder},"
+models\stages\table_structure\table_structure_model_granite_vision.py:175: self._load_model(artifacts_path)
+models\stages\table_structure\table_structure_model_granite_vision.py:196: def _load_model(self, artifacts_path: Path) -> None:
+models\stages\table_structure\table_structure_model_granite_vision.py:209: artifacts_path,
+models\stages\table_structure\table_structure_model_granite_vision.py:214: artifacts_path,
+models\stages\table_structure\table_structure_model_v2.py:42: artifacts_path: Optional[Path],
+models\stages\table_structure\table_structure_model_v2.py:53: if artifacts_path is None:
+models\stages\table_structure\table_structure_model_v2.py:55: elif (artifacts_path / self._model_repo_folder).exists():
+models\stages\table_structure\table_structure_model_v2.py:56: model_path = artifacts_path / self._model_repo_folder
+models\stages\table_structure\table_structure_model_v2.py:58: model_path = artifacts_path
+models\stages\vlm_convert\vlm_convert_model.py:82: artifacts_path: Path | str | None,
+models\stages\vlm_convert\vlm_convert_model.py:115: artifacts_path=artifacts_path,
+models\vlm_pipeline_models\hf_transformers_model.py:55: artifacts_path: Path | None,
+models\vlm_pipeline_models\hf_transformers_model.py:108: if artifacts_path is None:
+models\vlm_pipeline_models\hf_transformers_model.py:109: artifacts_path = self.download_models(
+models\vlm_pipeline_models\hf_transformers_model.py:112: elif (artifacts_path / repo_cache_folder).exists():
+models\vlm_pipeline_models\hf_transformers_model.py:113: artifacts_path = artifacts_path / repo_cache_folder
+models\vlm_pipeline_models\hf_transformers_model.py:115: # Model not found in artifacts_path - raise clear error
+models\vlm_pipeline_models\hf_transformers_model.py:117: if artifacts_path.exists():
+models\vlm_pipeline_models\hf_transformers_model.py:119: p.name for p in artifacts_path.iterdir() if p.is_dir()
+models\vlm_pipeline_models\hf_transformers_model.py:123: f"Model '{self.vlm_options.repo_id}' not found in artifacts_path.\n"
+models\vlm_pipeline_models\hf_transformers_model.py:124: f"Expected location: {artifacts_path / repo_cache_folder}\n"
+models\vlm_pipeline_models\hf_transformers_model.py:125: f"Available models in {artifacts_path}: "
+models\vlm_pipeline_models\hf_transformers_model.py:130: f"  3. Or use a different model that exists in your artifacts_path"
+models\vlm_pipeline_models\hf_transformers_model.py:153: artifacts_path,
+models\vlm_pipeline_models\hf_transformers_model.py:169: artifacts_path,
+models\vlm_pipeline_models\hf_transformers_model.py:183: artifacts_path, revision=vlm_options.revision
+models\vlm_pipeline_models\mlx_model.py:42: artifacts_path: Path | None,
+models\vlm_pipeline_models\mlx_model.py:68: if artifacts_path is None:
+models\vlm_pipeline_models\mlx_model.py:69: artifacts_path = self.download_models(
+models\vlm_pipeline_models\mlx_model.py:73: elif (artifacts_path / repo_cache_folder).exists():
+models\vlm_pipeline_models\mlx_model.py:74: artifacts_path = artifacts_path / repo_cache_folder
+models\vlm_pipeline_models\mlx_model.py:76: # Model not found in artifacts_path - raise clear error
+models\vlm_pipeline_models\mlx_model.py:78: if artifacts_path.exists():
+models\vlm_pipeline_models\mlx_model.py:80: p.name for p in artifacts_path.iterdir() if p.is_dir()
+models\vlm_pipeline_models\mlx_model.py:84: f"Model '{self.vlm_options.repo_id}' not found in artifacts_path.\n"
+models\vlm_pipeline_models\mlx_model.py:85: f"Expected location: {artifacts_path / repo_cache_folder}\n"
+models\vlm_pipeline_models\mlx_model.py:86: f"Available models in {artifacts_path}: "
+models\vlm_pipeline_models\mlx_model.py:91: f"  3. Or use a different model that exists in your artifacts_path"
+models\vlm_pipeline_models\mlx_model.py:95: self.vlm_model, self.processor = load(artifacts_path)
+models\vlm_pipeline_models\mlx_model.py:96: self.config = load_config(artifacts_path)
+models\vlm_pipeline_models\vllm_model.py:91: artifacts_path: Optional[Path],
+models\vlm_pipeline_models\vllm_model.py:130: if artifacts_path is None:
+models\vlm_pipeline_models\vllm_model.py:131: artifacts_path = self.download_models(
+models\vlm_pipeline_models\vllm_model.py:134: elif (artifacts_path / repo_cache_folder).exists():
+models\vlm_pipeline_models\vllm_model.py:135: artifacts_path = artifacts_path / repo_cache_folder
+models\vlm_pipeline_models\vllm_model.py:137: # Model not found in artifacts_path - raise clear error
+models\vlm_pipeline_models\vllm_model.py:139: if artifacts_path.exists():
+models\vlm_pipeline_models\vllm_model.py:141: p.name for p in artifacts_path.iterdir() if p.is_dir()
+models\vlm_pipeline_models\vllm_model.py:145: f"Model '{self.vlm_options.repo_id}' not found in artifacts_path.\n"
+models\vlm_pipeline_models\vllm_model.py:146: f"Expected location: {artifacts_path / repo_cache_folder}\n"
+models\vlm_pipeline_models\vllm_model.py:147: f"Available models in {artifacts_path}: "
+models\vlm_pipeline_models\vllm_model.py:152: f"  3. Or use a different model that exists in your artifacts_path"
+models\vlm_pipeline_models\vllm_model.py:173: "model": str(artifacts_path),
+models\vlm_pipeline_models\vllm_model.py:197: artifacts_path,
+pipeline\asr_pipeline.py:38: artifacts_path=self.artifacts_path,
+pipeline\asr_transcriber.py:195: artifacts_path: Path | None,
+pipeline\asr_transcriber.py:202: _log.info(f"artifacts-path: {artifacts_path}")
+pipeline\asr_transcriber.py:241: if artifacts_path is not None:
+pipeline\asr_transcriber.py:242: # artifacts_path means fully-offline operation: resolve the
+pipeline\asr_transcriber.py:248: cache_dir=str(artifacts_path),
+pipeline\asr_transcriber.py:253: f"artifacts_path ({artifacts_path}) does not contain "
+pipeline\asr_transcriber.py:257: f'--cache-dir "{artifacts_path}"'
+pipeline\asr_transcriber.py:266: elif artifacts_path is not None:
+pipeline\asr_transcriber.py:267: _log.info(f"loading {self.model_name} from {artifacts_path}")
+pipeline\asr_transcriber.py:271: download_root=str(artifacts_path),
+pipeline\asr_transcriber.py:375: artifacts_path: Path | None,
+pipeline\asr_transcriber.py:382: _log.info(f"artifacts-path: {artifacts_path}")
+pipeline\asr_transcriber.py:496: artifacts_path: Path | None,
+pipeline\asr_transcriber.py:502: _log.info(f"artifacts-path: {artifacts_path}")
+pipeline\asr_transcriber.py:757: artifacts_path: Path | None,
+pipeline\asr_transcriber.py:763: artifacts_path=artifacts_path,
+pipeline\asr_transcriber.py:770: artifacts_path=artifacts_path,
+pipeline\asr_transcriber.py:777: artifacts_path=artifacts_path,
+pipeline\base_extraction_pipeline.py:24: self.artifacts_path: Optional[Path] = None
+pipeline\base_extraction_pipeline.py:25: if pipeline_options.artifacts_path is not None:
+pipeline\base_extraction_pipeline.py:26: self.artifacts_path = Path(pipeline_options.artifacts_path).expanduser()
+pipeline\base_extraction_pipeline.py:27: elif settings.artifacts_path is not None:
+pipeline\base_extraction_pipeline.py:28: self.artifacts_path = Path(settings.artifacts_path).expanduser()
+pipeline\base_extraction_pipeline.py:30: if self.artifacts_path is not None and not self.artifacts_path.is_dir():
+pipeline\base_extraction_pipeline.py:32: f"The value of {self.artifacts_path=} is not valid. "
+pipeline\base_pipeline.py:53: self.artifacts_path: Optional[Path] = None
+pipeline\base_pipeline.py:54: if pipeline_options.artifacts_path is not None:
+pipeline\base_pipeline.py:55: self.artifacts_path = Path(pipeline_options.artifacts_path).expanduser()
+pipeline\base_pipeline.py:56: elif settings.artifacts_path is not None:
+pipeline\base_pipeline.py:57: self.artifacts_path = Path(settings.artifacts_path).expanduser()
+pipeline\base_pipeline.py:59: if self.artifacts_path is not None and not self.artifacts_path.is_dir():
+pipeline\base_pipeline.py:61: f"The value of {self.artifacts_path=} is not valid. "
+pipeline\base_pipeline.py:166: artifacts_path=self.artifacts_path
+pipeline\base_pipeline.py:177: artifacts_path=self.artifacts_path,
+pipeline\base_pipeline.py:202: artifacts_path=self.artifacts_path,
+pipeline\base_pipeline.py:211: artifacts_path=self.artifacts_path,
+pipeline\base_pipeline.py:219: self, artifacts_path: Optional[Path] = None
+pipeline\base_pipeline.py:228: artifacts_path=artifacts_path,
+pipeline\extraction_vlm_pipeline.py:59: artifacts_path=self.artifacts_path,
+pipeline\legacy_standard_pdf_pipeline.py:71: ocr_model = self.get_ocr_model(artifacts_path=self.artifacts_path)
+pipeline\legacy_standard_pdf_pipeline.py:78: artifacts_path=self.artifacts_path,
+pipeline\legacy_standard_pdf_pipeline.py:88: artifacts_path=self.artifacts_path,
+pipeline\legacy_standard_pdf_pipeline.py:128: artifacts_path=self.artifacts_path,
+pipeline\legacy_standard_pdf_pipeline.py:161: def get_ocr_model(self, artifacts_path: Optional[Path] = None) -> BaseOcrModel:
+pipeline\legacy_standard_pdf_pipeline.py:168: artifacts_path=artifacts_path,
+pipeline\standard_pdf_pipeline.py:595: art_path = self.artifacts_path
+pipeline\standard_pdf_pipeline.py:612: artifacts_path=art_path,
+pipeline\standard_pdf_pipeline.py:634: artifacts_path=art_path,
+pipeline\standard_pdf_pipeline.py:659: artifacts_path=self.artifacts_path,
+pipeline\standard_pdf_pipeline.py:685: artifacts_path=art_path,
+pipeline\video_pipeline.py:120: artifacts_path=self.artifacts_path,
+pipeline\vlm_pipeline.py:126: artifacts_path=self.artifacts_path,
+pipeline\vlm_pipeline.py:177: artifacts_path=self.artifacts_path,
+pipeline\vlm_pipeline.py:186: artifacts_path=self.artifacts_path,
+pipeline\vlm_pipeline.py:197: artifacts_path=self.artifacts_path,
+
+=== docling cache/default-cache resolution lines ===
+backend\latex\engines\tectonic.py:59: self.cache_dir = Path.home() / ".cache" / "docling" / "tectonic"
+backend\latex\engines\tectonic.py:60: self.binary_path = self.cache_dir / "tectonic"
+cli\models.py:89: ] = (settings.cache_dir / "models"),
+cli\models.py:229: ] = (settings.cache_dir / "models"),
+datamodel\settings.py:67: cache_dir: Path = Path.home() / ".cache" / "docling"
+models\stages\ocr\easyocr_model.py:154: local_dir = settings.cache_dir / "models" / EasyOcrModel._model_repo_folder
+models\stages\ocr\nemotron_ocr_model.py:230: local_dir = settings.cache_dir / "models" / nemotron_ocr_model_dir()
+models\stages\ocr\rapid_ocr_model.py:464: local_dir = settings.cache_dir / "models" / cls._model_repo_folder
+pipeline\asr_transcriber.py:248: cache_dir=str(artifacts_path),
+utils\model_downloader.py:87: output_dir = settings.cache_dir / "models"
