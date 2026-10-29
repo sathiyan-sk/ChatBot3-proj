@@ -78,37 +78,67 @@ def _tiny_image_only_pdf() -> bytes:
 def _preflight_cache() -> None:
     """Fail fast with an actionable message instead of a 300s timeout wait.
 
-    The Docling cold-start error (missing ``docling-layout-heron``) is a config
-    problem, not a code problem. Surface it here so a botched env is diagnosed
-    in milliseconds rather than reproduced as an INGESTION_TIMEOUT_SECONDS abort.
+    Docling's StandardPdfPipeline initializes the layout model
+    (docling-project/docling-layout-heron) UNCONDITIONALLY on every parse in
+    this build -- ``DOCLING_SKIP_LAYOUT=1`` only skips layout *detection*, not
+    the model *load*. The heron model must therefore be reachable: present in
+    DOCLING_ARTIFACTS_PATH, or auto-downloadable to HF_HOME on first use.
+    RapidOCR weights must also be present (in artifacts_path or bundled with
+    the rapidocr package). Surface any gap in milliseconds, not as an abort.
     """
     artifacts_path = os.getenv("DOCLING_ARTIFACTS_PATH", "").strip() or None
-    if not artifacts_path:
-        print("prewarm: ERROR DOCLING_ARTIFACTS_PATH is unset; set it to the "
-              "shared cache dir (e.g. /var/lib/docling/artifacts).")
-        sys.exit(2)
-    if not os.path.isdir(artifacts_path):
-        print(f"prewarm: ERROR artifacts_path={artifacts_path!r} does not exist.")
-        sys.exit(2)
-    rapidocr_dir = os.path.join(artifacts_path, "RapidOcr")
-    weights = sorted(pathlib.Path(rapidocr_dir).glob("PP-OCRv*.onnx"))
-    if len(weights) < 3:
-        print(f"prewarm: ERROR only {len(weights)} RapidOCR weight(s) found in "
-              f"{rapidocr_dir!r}; prefetch with "
-              "`docling-tools models download rapidocr "
-              "--rapidocr-backend-lang onnxruntime:en -o \"$DOCLING_ARTIFACTS_PATH\"` "
-              "and retry.")
-        sys.exit(2)
-    print(f"preflight: OK artifacts_path={artifacts_path!r} "
-          f"rapidocr_weights={len(weights)}")
-    skip_layout = os.getenv("DOCLING_SKIP_LAYOUT", "").strip().lower()
-    if skip_layout in ("", "0", "false"):
-        print("preflight: WARNING DOCLING_SKIP_LAYOUT unset -> Docling will try to "
-              "load docling-project/docling-layout-heron, which is NOT in the shared "
-              "cache and will reproduce the 300s timeout-to-FileNotFoundError. Set "
-              "DOCLING_SKIP_LAYOUT=1 (recommended for scanned/image-only PDFs).")
+    hf_home = os.getenv("HF_HOME", "").strip() or None
+    heron_dirname = "docling-project--docling-layout-heron"
+
+    # --- RapidOCR weights (3 onnx files) ---
+    if artifacts_path:
+        weights = sorted(pathlib.Path(artifacts_path, "RapidOcr").glob("PP-OCRv*.onnx"))
     else:
-        print("preflight: OK layout model skipped (DOCLING_SKIP_LAYOUT=1).")
+        weights = []
+    if len(weights) < 3:
+        try:
+            import rapidocr  # local import: parsing itself does not need it
+            pkg_models = pathlib.Path(rapidocr.__file__).parent / "models"
+            weights = sorted(pkg_models.glob("PP-OCRv*.onnx"))
+        except Exception:
+            weights = []
+    if len(weights) < 3:
+        print(f"prewarm: ERROR found {len(weights)} RapidOCR onnx weight(s). Prefetch:")
+        print("  .venv/bin/docling-tools models download rapidocr "
+              "--rapidocr-backend-lang onnxruntime:en -o '$DOCLING_ARTIFACTS_PATH'")
+        print("  (or unset DOCLING_ARTIFACTS_PATH so it auto-downloads). Then re-run.")
+        sys.exit(2)
+    print(f"preflight: OK rapidocr_weights={len(weights)}")
+
+    # --- Layout model (docling-project/docling-layout-heron) ---
+    if artifacts_path:
+        if pathlib.Path(artifacts_path, heron_dirname).is_dir():
+            print(f"preflight: OK layout model present in artifacts_path={artifacts_path!r}")
+            return
+        print(f"prewarm: ERROR layout model {heron_dirname} not in artifacts_path="
+              f"{artifacts_path!r} (Docling always loads it in this version).")
+        print("  (a) prefetch: .venv/bin/docling-tools models download-hf-repo "
+              "docling-project/docling-layout-heron -o '$DOCLING_ARTIFACTS_PATH'")
+        print("  (b) OR unset DOCLING_ARTIFACTS_PATH and let it auto-download to HF_HOME.")
+        print("  NOTE: DOCLING_SKIP_LAYOUT=1 only skips layout *detection*, not this load.")
+        sys.exit(2)
+    # artifacts_path unset -> heron must auto-download into HF_HOME
+    if not hf_home:
+        print("prewarm: ERROR HF_HOME is unset and artifacts_path has no layout model.")
+        print("  Set HF_HOME=<writable dir>, e.g. /var/lib/docling/hf_cache")
+        sys.exit(2)
+    if not os.path.isdir(hf_home):
+        print(f"prewarm: ERROR HF_HOME={hf_home!r} does not exist. Create + chown it:")
+        print(f"  sudo mkdir -p {hf_home} && "
+              f"sudo chown -R <runtime-user>:<runtime-user> {hf_home}")
+        sys.exit(2)
+    if not os.access(hf_home, os.W_OK):
+        print(f"prewarm: ERROR HF_HOME={hf_home!r} exists but is not writable by this "
+              f"user (prior crash was PermissionError writing .../{heron_dirname}).")
+        print(f"  sudo chown -R <runtime-user>:<runtime-user> {hf_home}")
+        sys.exit(2)
+    print(f"preflight: OK layout model will auto-download to HF_HOME={hf_home!r} "
+          "(first run only; cached thereafter).")
 
 
 def main() -> int:
