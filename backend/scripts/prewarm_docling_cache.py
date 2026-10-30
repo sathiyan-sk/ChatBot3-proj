@@ -92,14 +92,14 @@ def _preflight_cache() -> None:
 
     # --- RapidOCR weights (3 onnx files) ---
     if artifacts_path:
-        weights = sorted(pathlib.Path(artifacts_path, "RapidOcr").glob("PP-OCRv*.onnx"))
+        weights = sorted(pathlib.Path(artifacts_path, "RapidOcr").glob("*.onnx"))
     else:
         weights = []
     if len(weights) < 3:
         try:
             import rapidocr  # local import: parsing itself does not need it
             pkg_models = pathlib.Path(rapidocr.__file__).parent / "models"
-            weights = sorted(pkg_models.glob("PP-OCRv*.onnx"))
+            weights = sorted(pkg_models.glob("*.onnx"))
         except Exception:
             weights = []
     if len(weights) < 3:
