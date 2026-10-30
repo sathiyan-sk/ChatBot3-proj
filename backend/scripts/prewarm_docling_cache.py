@@ -44,6 +44,12 @@ import sys
 
 import pymupdf  # PyMuPDF; available wherever Docling OCR runs
 
+# Make this script runnable directly (``python scripts/prewarm_docling_cache.py``)
+# regardless of cwd / PYTHONPATH by putting the backend/ package root on sys.path
+# so ``from app...`` resolves. (The service runner sets PYTHONPATH already; this
+# just keeps the one-shot prewarm self-sufficient.)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
 from app.knowledge_engine.shared.models import RawSource
 from app.infrastructure.providers.parsing.docling_provider import DoclingParsingProvider
 
