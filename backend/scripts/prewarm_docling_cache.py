@@ -48,23 +48,38 @@ from app.knowledge_engine.shared.models import RawSource
 from app.infrastructure.providers.parsing.docling_provider import DoclingParsingProvider
 
 
-def _tiny_image_only_pdf() -> bytes:
+def _little_ocr_probe_pdf() -> bytes:
     """A 1-page image-only PDF (no selectable text layer) to warm the cache.
 
     The glyph string is rasterized to a pixmap and stamped as an image, so the
     PyMuPDF fast path yields 0 selectable chars and Docling image OCR runs for
-    real (exercising the RapidOCR weights + scale selection) while still
+    real (exercising the RapidOCR weights + the scale selection) while still
     producing non-empty markdown.
+
+    The scratch page deliberately matches the destination page aspect ratio
+    (so insert_image scales uniformly -- no horizontal/vertical stretch that
+    would thin glyphs) and uses bold, high-contrast strokes at a generous
+    point size, because a distorted/thin glyph is the one failure mode that
+    makes an otherwise-healthy detector report an empty result.
     """
+    width_pt, height_pt = 600, 300  # 8.3in x 4.2in
     doc = pymupdf.open()
-    page = doc.new_page(width=400, height=200)
+    page = doc.new_page(width=width_pt, height=height_pt)
 
     scratch = pymupdf.open()
-    scratch_page = scratch.new_page(width=340, height=110)
+    scratch_page = scratch.new_page(width=width_pt, height=height_pt)
+    scratch_page.draw_rect(scratch_page.rect, color=None, fill=(1, 1, 1))
     scratch_page.insert_text(
-        (20, 70), "OCR-CALIBRATION 0123 4567", fontsize=36, color=(0, 0, 0),
+        (40, 160), "OCR-CALIBRATION 0123 4567",
+        fontsize=64, fontname="hebo", color=(0, 0, 0),
+    )
+    scratch_page.insert_text(
+        (40, 240), "CONFIDENTIAL ID 9876 5432",
+        fontsize=34, fontname="hebo", color=(0, 0, 0),
     )
     # Rasterize at scale 2.0 (144 DPI) to match the configured OCR raster DPI.
+    # 600x300 @2x -> 1200x600; inserted 1:1 into a 600x300pt page -> uniform
+    # 0.5 scale, glyphs keep their natural proportions.
     pixmap = scratch_page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
     page.insert_image(page.rect, pixmap=pixmap)
     pixmap = None
@@ -143,7 +158,7 @@ def _preflight_cache() -> None:
 
 def main() -> int:
     _preflight_cache()
-    pdf_bytes = _tiny_image_only_pdf()
+    pdf_bytes = _little_ocr_probe_pdf()
     print(f"prewarm: synthetic image-only PDF built, bytes={len(pdf_bytes)}")
 
     provider = DoclingParsingProvider()  # defaults: do_ocr=True, ocr_mode="default"
