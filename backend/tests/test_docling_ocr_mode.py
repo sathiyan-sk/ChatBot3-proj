@@ -197,3 +197,58 @@ def test_parse_rejects_disallowed_extension():
         provider.parse(source)
     assert exc.value.code == "docling_format_unsupported"
     assert ".png" in exc.value.message
+
+
+# ---------------------------------------------------------------------------
+# prewarm _preflight_cache: TableFormer regression (no native deps; pymupdf is
+# stubbed so scripts/prewarm_docling_cache.py imports cleanly on this box).
+# ---------------------------------------------------------------------------
+import importlib.util
+import sys as _sys
+import types
+from pathlib import Path
+
+_PREFLIGHT = Path(__file__).resolve().parents[1] / "scripts" / "prewarm_docling_cache.py"
+
+
+def _load_prewarm():
+    _sys.modules.setdefault("pymupdf", types.ModuleType("pymupdf"))
+    spec = importlib.util.spec_from_file_location("prewarm_test_only", _PREFLIGHT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _seed_rapidocr_and_heron(root: Path) -> None:
+    (root / "RapidOcr").mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        (root / "RapidOcr" / f"PP-OCRv6_{i}.onnx").write_bytes(b"x")
+    (root / "docling-project--docling-layout-heron").mkdir(parents=True, exist_ok=True)
+    (root / "docling-project--docling-layout-heron" / "config.json").write_text("{}")
+
+
+def test_preflight_exits_when_tableformer_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", str(tmp_path))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    _seed_rapidocr_and_heron(tmp_path)  # layout + OCR present, TableFormer absent
+    mod = _load_prewarm()
+    with pytest.raises(SystemExit) as exc:
+        mod._preflight_cache()
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "table structure model not in artifacts_path" in out
+    assert "docling-tools models download tableformer" in out
+
+
+def test_preflight_passes_when_tableformer_present(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", str(tmp_path))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    _seed_rapidocr_and_heron(tmp_path)
+    tbl = (tmp_path / "docling-project--docling-models" / "model_artifacts"
+           / "tableformer" / "accurate")
+    tbl.mkdir(parents=True)
+    (tbl / "tm_config.json").write_text("{}")
+    mod = _load_prewarm()
+    assert mod._preflight_cache() is None  # OK path returns None (no SystemExit)
+    out = capsys.readouterr().out
+    assert "preflight: OK table model present" in out

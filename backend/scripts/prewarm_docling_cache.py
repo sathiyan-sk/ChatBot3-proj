@@ -22,12 +22,24 @@ Cache provisioning model
           --rapidocr-backend-lang onnxruntime:en -o "$DOCLING_ARTIFACTS_PATH"
 
   which materializes the ``RapidOcr/PP-OCRv*.onnx`` weights the parse then looks
-  for under ``<artifacts_path>/RapidOcr``. Run it ONCE on the shared volume.
+  for under ``<artifacts_path>/RapidOcr``. Run it ONCE on the shared volume, then
+  prefetch the layout model too:
 
-  For scanned/image-only PDFs (e.g. Aadhaar cards), also set DOCLING_SKIP_LAYOUT=1:
-  Docling then skips the ``docling-project/docling-layout-heron`` model and runs
-  OCR only, so only the RapidOCR weights above need preloading (no layout model
-  download required).
+      .venv/bin/python - <<'PY'
+      from huggingface_hub import snapshot_download
+      snapshot_download("docling-project/docling-layout-heron",
+                        local_dir="<ARTIFACTS>/docling-project--docling-layout-heron",
+                        local_dir_use_symlinks=False)
+      PY
+
+  so ``<artifacts_path>/docling-project--docling-layout-heron`` also exists.
+
+  For scanned/image-only PDFs (e.g. Aadhaar cards), set DOCLING_SKIP_LAYOUT=1 to
+  skip layout *detection* (faster ingestion). NOTE: in this Docling build the
+  ``docling-project/docling-layout-heron`` model is still loaded UNCONDITIONALLY
+  (DOCLING_SKIP_LAYOUT only skips the detection pass, not the model *init*), so
+  heron must still be reachable -- prefetch it (command above) or leave
+  DOCLING_ARTIFACTS_PATH unset so it auto-downloads once into $HF_HOME.
 * If ``DOCLING_ARTIFACTS_PATH`` is left unset, Docling falls back to its default
   cache (under ``$HF_HOME``) and auto-downloads on first OCR — but that makes the
   first real Aadhaar pay the download time (the 300s timeout). Prefer the
@@ -133,16 +145,37 @@ def _preflight_cache() -> None:
 
     # --- Layout model (docling-project/docling-layout-heron) ---
     if artifacts_path:
-        if pathlib.Path(artifacts_path, heron_dirname).is_dir():
-            print(f"preflight: OK layout model present in artifacts_path={artifacts_path!r}")
-            return
-        print(f"prewarm: ERROR layout model {heron_dirname} not in artifacts_path="
-              f"{artifacts_path!r} (Docling always loads it in this version).")
-        print("  (a) prefetch: .venv/bin/docling-tools models download-hf-repo "
-              "docling-project/docling-layout-heron -o '$DOCLING_ARTIFACTS_PATH'")
-        print("  (b) OR unset DOCLING_ARTIFACTS_PATH and let it auto-download to HF_HOME.")
-        print("  NOTE: DOCLING_SKIP_LAYOUT=1 only skips layout *detection*, not this load.")
-        sys.exit(2)
+        if not pathlib.Path(artifacts_path, heron_dirname).is_dir():
+            print(f"prewarm: ERROR layout model {heron_dirname} not in artifacts_path="
+                  f"{artifacts_path!r} (Docling always loads it in this version).")
+            print("  (a) prefetch: .venv/bin/docling-tools models download-hf-repo "
+                  "docling-project/docling-layout-heron -o '$DOCLING_ARTIFACTS_PATH'")
+            print("  (b) OR unset DOCLING_ARTIFACTS_PATH and let it auto-download to HF_HOME.")
+            print("  NOTE: DOCLING_SKIP_LAYOUT=1 only skips layout *detection*, not this load.")
+            sys.exit(2)
+        print(f"preflight: OK layout model present in artifacts_path={artifacts_path!r}")
+
+        # --- Table structure model (docling-project/docling-models -> accurate) ---
+        # StandardPdfPipeline._init_models builds the TableFormer 'accurate' model
+        # UNCONDITIONALLY on every parse (do_table_structure defaults True), even
+        # under DOCLING_SKIP_LAYOUT=1, and reads tm_config.json from the artifacts
+        # share. Fail fast HERE in ms instead of a ~13s convert-time abort.
+        tbl_dir = pathlib.Path(
+            artifacts_path,
+            "docling-project--docling-models",
+            "model_artifacts",
+            "tableformer",
+            "accurate",
+        )
+        if not (tbl_dir / "tm_config.json").is_file():
+            print(f"prewarm: ERROR table structure model not in artifacts_path={artifacts_path!r}:")
+            print(f"  missing {tbl_dir}/tm_config.json")
+            print("  prefetch: .venv/bin/docling-tools models download tableformer "
+                  "-o '$DOCLING_ARTIFACTS_PATH'")
+            print("  (or unset DOCLING_ARTIFACTS_PATH and let it auto-download to HF_HOME).")
+            sys.exit(2)
+        print(f"preflight: OK table model present in artifacts_path={artifacts_path!r}")
+        return
     # artifacts_path unset -> heron must auto-download into HF_HOME
     if not hf_home:
         print("prewarm: ERROR HF_HOME is unset and artifacts_path has no layout model.")
