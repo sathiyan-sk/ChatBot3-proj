@@ -176,9 +176,9 @@ def main() -> int:
     )
     parsed = provider.parse(source)
     sections = len(parsed.sections) if getattr(parsed, "sections", None) else 0
-    preview = (parsed.markdown or "")[:120].replace("\n", " ")
+    preview = (parsed.content or "")[:120].replace("\n", " ")
     print(f"prewarm: OK status=success sections={sections} "
-          f"markdown_chars={len(parsed.markdown)} preview={preview!r}")
+          f"markdown_chars={len(parsed.content)} preview={preview!r}")
 
     artifacts = os.getenv("DOCLING_ARTIFACTS_PATH", "")
     hf_home = os.getenv("HF_HOME", "")
