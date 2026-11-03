@@ -11,6 +11,10 @@ export default defineConfig({
   plugins: [react({
     jsxRuntime: 'automatic',
   }), tailwindcss()],
+
+    // Dashboard is hosted under /admin/
+  base: '/admin/',
+
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
