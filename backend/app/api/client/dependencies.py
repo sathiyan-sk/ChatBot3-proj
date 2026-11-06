@@ -4,8 +4,10 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Request,
     status,
 )
+from urllib.parse import urlsplit
 from sqlalchemy import select
 
 from app.api.dependencies import get_container
