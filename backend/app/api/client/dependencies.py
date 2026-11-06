@@ -68,6 +68,7 @@ def get_client_application_context(
         session.close()
 
 def get_widget_application_id(
+    request: Request,
     x_widget_key: str = Header(
         default="",
         alias="X-Widget-Key",
@@ -125,18 +126,43 @@ def get_widget_application_id(
             )
 
         allowed_origins = application.allowed_origins or []
-        if not origin:
+        # Resolve origin from Origin header or Referer fallback.
+        request_origin = origin
+
+        if not request_origin:
+            referer = request.headers.get("referer")
+
+            if referer:
+                try:
+                    parsed = urlsplit(referer)
+
+                    if (
+                        parsed.scheme in {"http", "https"}
+                        and parsed.hostname
+                        and parsed.username is None
+                        and parsed.password is None
+                        and (parsed.port is None or 0 < parsed.port <= 65535)
+                    ):
+                        request_origin = (
+                            f"{parsed.scheme}://{parsed.netloc}"
+                        )
+                except ValueError:
+                    request_origin = None
+
+        # Reject requests without a valid origin.
+        if not request_origin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Origin header is required for widget requests.",
+                detail="Origin or valid Referer header is required.",
             )
 
-        if not validator.is_allowed(origin, allowed_origins):
+        # Validate against the application's registered origins.
+        if not validator.is_allowed(request_origin, allowed_origins):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Origin is not allowed for this application.",
             )
-
+            
         return str(widget.application_id)
 
     finally:
