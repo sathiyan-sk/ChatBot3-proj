@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.config.settings import Settings
 from app.core.exceptions import ConfigurationError
 from app.infrastructure.providers.embeddings.huggingface_embeddings_provider import (
@@ -15,30 +17,50 @@ from app.infrastructure.providers.embeddings.openrouter_embeddings_provider impo
 from app.knowledge_engine.domain.provider_interfaces import EmbeddingProvider
 
 
-def build_embeddings_provider(settings: Settings) -> EmbeddingProvider:
-    provider_name = settings.providers.embeddings.strip().lower()
+def build_embeddings_provider(
+    settings: Settings,
+    *,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+) -> EmbeddingProvider:
+    provider_name = (provider_name or settings.providers.embeddings).strip().lower()
     if provider_name == "openrouter":
-        if (
-            settings.openrouter.embedding_dimensions
-            != settings.vector_store_dimension
-        ):
+        provider_settings = replace(
+            settings.openrouter,
+            embedding_model=model_name or settings.openrouter.embedding_model,
+        )
+        if provider_settings.embedding_dimensions != settings.vector_store_dimension:
             raise ConfigurationError(
                 "OPENROUTER_EMBEDDING_DIMENSIONS must match "
                 "VECTOR_STORE_DIMENSION."
             )
-        return OpenRouterEmbeddingsProvider(settings=settings.openrouter)
+        return OpenRouterEmbeddingsProvider(settings=provider_settings)
     if provider_name == "huggingface":
+        provider_settings = replace(
+            settings.huggingface,
+            embedding_model=model_name or settings.huggingface.embedding_model,
+        )
         return HuggingFaceEmbeddingsProvider(
-            settings=settings.huggingface,
+            settings=provider_settings,
             vector_dimension=settings.vector_store_dimension,
         )
     if provider_name == "openai":
+        provider_settings = replace(
+            settings.openai_embeddings,
+            embedding_model=model_name or settings.openai_embeddings.embedding_model,
+        )
         return OpenAIEmbeddingsProvider(
-            settings=settings.openai_embeddings,
+            settings=provider_settings,
             vector_dimension=settings.vector_store_dimension,
         )
     if provider_name in {"ollama", "nomic"}:
-        return NomicEmbeddingsProvider(settings=settings)
+        ollama_settings = replace(
+            settings.ollama,
+            embedding_model_name=model_name or settings.ollama.embedding_model_name,
+        )
+        return NomicEmbeddingsProvider(
+            settings=replace(settings, ollama=ollama_settings)
+        )
     raise ConfigurationError(
         f"Unsupported EMBEDDING_PROVIDER value: {provider_name!r}."
     )

@@ -11,6 +11,11 @@ class CreateSettingsCommand:
     inactivity_timeout_minutes: int = 30
     retention_days: int = 30
     prompt_system_template: str | None = None
+    parser_provider: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -21,3 +26,8 @@ class UpdateSettingsCommand:
     inactivity_timeout_minutes: int
     retention_days: int
     prompt_system_template: str | None = None
+    parser_provider: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None

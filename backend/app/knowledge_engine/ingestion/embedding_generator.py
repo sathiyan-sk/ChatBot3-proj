@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.knowledge_engine.contracts.embeddings import EmbeddingsContract
+from app.knowledge_engine.contracts.embeddings import (
+    EmbeddingsContract,
+    validate_embedding_dimension,
+)
 from app.knowledge_engine.shared.models import DocumentChunk, EmbeddedChunk
 
 logger = logging.getLogger(__name__)
@@ -12,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class EmbeddingGenerator:
     embeddings_contract: EmbeddingsContract
+    expected_dimension: int | None = None
 
     def generate(self, chunks: list[DocumentChunk]) -> list[EmbeddedChunk]:
         embedded_chunks: list[EmbeddedChunk] = []
@@ -36,6 +40,10 @@ class EmbeddingGenerator:
             zip(chunks, embeddings),
             start=1,
         ):
+            validate_embedding_dimension(
+                embedding,
+                expected_dimension=self.expected_dimension,
+            )
             embedded_chunks.append(
                 EmbeddedChunk(
                     chunk_id=chunk.chunk_id,

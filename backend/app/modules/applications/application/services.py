@@ -7,6 +7,12 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config.settings import Settings
+from app.config.provider_registry import (
+    build_provider_catalog,
+    is_supported_selection,
+    platform_default_selection,
+)
 from app.core.exceptions import ApplicationError
 from app.modules.applications.application.commands import (
     CreateApplicationCommand,
@@ -32,6 +38,7 @@ class ApplicationServices:
     session: Session
     application_repository: ApplicationRepository
     provisioning_repository: ApplicationProvisioningRepository
+    platform_settings: Settings
 
     def create_application(self, command: CreateApplicationCommand) -> CreatedApplicationDto:
         normalized_name = normalize_application_name(command.name)
@@ -45,6 +52,42 @@ class ApplicationServices:
                 message=f"Application slug '{slug}' already exists.",
                 code="application_slug_exists",
                 status_code=409,
+            )
+
+        parser_provider, parser_model = platform_default_selection(
+            self.platform_settings,
+            capability="parser",
+        )
+        embedding_provider, embedding_model = platform_default_selection(
+            self.platform_settings,
+            capability="embedding",
+        )
+        llm_provider, llm_model = platform_default_selection(
+            self.platform_settings,
+            capability="llm",
+        )
+        catalog = build_provider_catalog(self.platform_settings)
+        defaults = (
+            ("parser", parser_provider, parser_model),
+            ("embedding", embedding_provider, embedding_model),
+            ("llm", llm_provider, llm_model),
+        )
+        if any(
+            not is_supported_selection(
+                catalog,
+                capability=capability,
+                provider=provider,
+                model=model,
+            )
+            for capability, provider, model in defaults
+        ):
+            raise ApplicationError(
+                message=(
+                    "The platform's default provider/model selection is not "
+                    "available in the enabled provider catalog."
+                ),
+                code="platform_provider_default_unsupported",
+                status_code=503,
             )
 
         application = self.application_repository.create(
@@ -61,7 +104,14 @@ class ApplicationServices:
             application_id=str(application.id),
             application_name=application.name,
         )
-        self.provisioning_repository.create_default_settings(application_id=str(application.id))
+        self.provisioning_repository.create_default_settings(
+            application_id=str(application.id),
+            parser_provider=parser_provider,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model or "",
+            llm_provider=llm_provider,
+            llm_model=llm_model or "",
+        )
         self.provisioning_repository.create_api_key(
             application_id=str(application.id),
             key_name="Default API Key",

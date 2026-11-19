@@ -1,13 +1,16 @@
 from __future__ import annotations
 from dataclasses import asdict
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from app.api.dependencies import get_settings_application_service
 from app.api.schemas.settings import (
     CreateSettingsRequest,
+    ProviderCatalogResponse,
+    ProviderModelOptionResponse,
     SettingsResponse,
     UpdateSettingsRequest,
 )
+from app.config.provider_registry import build_provider_catalog
 from app.modules.settings.application.commands import (
     CreateSettingsCommand,
     UpdateSettingsCommand,
@@ -16,6 +19,40 @@ from app.modules.settings.application.queries import GetSettingsByApplicationQue
 from app.modules.settings.application.services import SettingsApplicationService
 
 router = APIRouter(prefix="/admin/settings", tags=["Admin Settings"])
+
+
+@router.get("/provider-catalog", response_model=ProviderCatalogResponse)
+def get_provider_catalog(request: Request) -> ProviderCatalogResponse:
+    catalog = build_provider_catalog(request.app.state.settings)
+    return ProviderCatalogResponse(
+        parsers=[
+            ProviderModelOptionResponse(
+                provider=option.provider,
+                model=option.model,
+                label=option.label,
+                embedding_dimensions=option.embedding_dimensions,
+            )
+            for option in catalog.parsers
+        ],
+        embeddings=[
+            ProviderModelOptionResponse(
+                provider=option.provider,
+                model=option.model,
+                label=option.label,
+                embedding_dimensions=option.embedding_dimensions,
+            )
+            for option in catalog.embeddings
+        ],
+        llms=[
+            ProviderModelOptionResponse(
+                provider=option.provider,
+                model=option.model,
+                label=option.label,
+                embedding_dimensions=option.embedding_dimensions,
+            )
+            for option in catalog.llms
+        ],
+    )
 
 
 @router.post("", response_model=SettingsResponse, status_code=status.HTTP_201_CREATED)
@@ -31,6 +68,11 @@ def create_settings(
             inactivity_timeout_minutes=request.inactivity_timeout_minutes,
             retention_days=request.retention_days,
             prompt_system_template=request.prompt_system_template,
+            parser_provider=request.parser_provider,
+            embedding_provider=request.embedding_provider,
+            embedding_model=request.embedding_model,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
         )
     )
     return SettingsResponse.model_validate(asdict(result))
@@ -63,6 +105,11 @@ def update_settings(
             inactivity_timeout_minutes=request.inactivity_timeout_minutes,
             retention_days=request.retention_days,
             prompt_system_template=request.prompt_system_template,
+            parser_provider=request.parser_provider,
+            embedding_provider=request.embedding_provider,
+            embedding_model=request.embedding_model,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
         )
     )
     return SettingsResponse.model_validate(asdict(result))

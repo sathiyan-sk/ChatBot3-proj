@@ -26,5 +26,10 @@ class SettingsModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
     inactivity_timeout_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     prompt_system_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parser_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    embedding_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     application = relationship("ApplicationModel", back_populates="settings")

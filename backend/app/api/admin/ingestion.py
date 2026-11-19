@@ -33,6 +33,7 @@ from app.api.schemas.ingestion import (
     IngestionResponse,
     StartIngestionRequest,
 )
+from app.config.provider_registry import resolve_application_selection
 from app.infrastructure.db.models.document_model import DocumentModel
 from app.knowledge_engine.shared.models import (
     KnowledgeIngestionPipelineRequest,
@@ -46,6 +47,9 @@ from app.modules.documents.application.queries import (
 )
 from app.config.settings import Settings
 from app.core.exceptions import ApplicationError
+from app.modules.settings.infrastructure.repositories import (
+    SqlAlchemySettingsRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -913,6 +917,25 @@ def run_document_ingestion_task(
                 "Document ingestion version is required to process this attempt."
             )
 
+        settings_repository = SqlAlchemySettingsRepository(
+            active_session,
+            vector_store_table_name=application.state.settings.vector_store_table_name,
+        )
+        application_settings = settings_repository.get_by_application_id(
+            str(document.application_id)
+        )
+        if application_settings is None:
+            raise ApplicationError(
+                message="Application settings are required for document ingestion.",
+                code="application_settings_missing",
+                status_code=503,
+            )
+        captured_embedding_selection = resolve_application_selection(
+            application.state.settings,
+            application_settings,
+            capability="embedding",
+        )
+
         document_service.mark_processing(
             MarkDocumentProcessingCommand(
                 document_id=document_id,
@@ -932,6 +955,7 @@ def run_document_ingestion_task(
             source_type=source_type,
             settings=application.state.settings,
             session=active_session,
+            application_settings=application_settings,
         )
         parsing_contract = getattr(
             ingestion_pipeline.parser,
@@ -963,6 +987,33 @@ def run_document_ingestion_task(
         )
 
         ingestion_pipeline.run(pipeline_request)
+
+        current_application_settings = (
+            settings_repository.get_by_application_id_for_update(
+                str(document.application_id)
+            )
+        )
+        if current_application_settings is None:
+            raise ApplicationError(
+                message="Application settings disappeared during document ingestion.",
+                code="application_settings_missing",
+                status_code=503,
+            )
+        current_embedding_selection = resolve_application_selection(
+            application.state.settings,
+            current_application_settings,
+            capability="embedding",
+        )
+        if current_embedding_selection != captured_embedding_selection:
+            raise ApplicationError(
+                message=(
+                    "Document embeddings were generated using a stale application "
+                    "configuration and were not published; the job will retry."
+                ),
+                code="stale_embedding_configuration",
+                status_code=409,
+                details={"retryable": True},
+            )
 
         published = active_session.execute(
             update(DocumentModel)

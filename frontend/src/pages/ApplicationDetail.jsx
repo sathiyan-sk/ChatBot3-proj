@@ -52,6 +52,9 @@ const DOC_STATUS = {
   archived: { variant: "neutral", label: "archived" },
 };
 
+const providerChoices = (options = []) =>
+  [...new Set(options.map((option) => option.provider))];
+
 // Preview theme tokens mirroring the real widget.css CSS variables so the
 // Live Preview reflects the ACTUAL light/dark appearance (panel background,
 // bubbles, input, footer and launcher), not just the header colour.
@@ -99,7 +102,20 @@ export default function ApplicationDetail() {
   const [documents, setDocuments] = useState([]);
   const [knowledgeBase, setKnowledgeBase] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [providerCatalog, setProviderCatalog] = useState(null);
+  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [widgetCfg, setWidgetCfg] = useState(null);
+  const parserOptions = providerCatalog?.parsers || [];
+  const embeddingOptions = providerCatalog?.embeddings || [];
+  const llmOptions = providerCatalog?.llms || [];
+  const embeddingProviders = providerChoices(embeddingOptions);
+  const llmProviders = providerChoices(llmOptions);
+  const selectedEmbeddingModels = embeddingOptions.filter(
+    (option) => option.provider === settings?.embedding_provider
+  );
+  const selectedLlmModels = llmOptions.filter(
+    (option) => option.provider === settings?.llm_provider
+  );
 
   // Interaction sandbox testing states
   const [sandboxQuestion, setSandboxQuestion] = useState("");
@@ -206,6 +222,15 @@ export default function ApplicationDetail() {
 
         // Fetch settings
         try {
+          const catalogRes = await apiClient.get("/admin/settings/provider-catalog");
+          setProviderCatalog(catalogRes.data);
+        } catch (error) {
+          console.error("Failed to load provider catalog.", error);
+          setProviderCatalog(null);
+          toast.error("Failed to load provider and model options.");
+        }
+
+        try {
           const settingsRes = await apiClient.get(`/admin/settings/by-application/${id}`);
           setSettings(settingsRes.data);
         } catch {
@@ -290,6 +315,7 @@ export default function ApplicationDetail() {
 
   const handleUpdateSettings = async (e) => {
     e.preventDefault();
+    setSettingsSaveError("");
     try {
       if (settings?.id) {
         // Update existing settings
@@ -299,6 +325,11 @@ export default function ApplicationDetail() {
           inactivity_timeout_minutes: settings.inactivity_timeout_minutes,
           retention_days: settings.retention_days,
           prompt_system_template: settings.prompt_system_template,
+          parser_provider: settings.parser_provider,
+          embedding_provider: settings.embedding_provider,
+          embedding_model: settings.embedding_model,
+          llm_provider: settings.llm_provider,
+          llm_model: settings.llm_model,
         });
       } else {
         // Create new settings
@@ -309,13 +340,23 @@ export default function ApplicationDetail() {
           inactivity_timeout_minutes: settings?.inactivity_timeout_minutes ?? 30,
           retention_days: settings?.retention_days ?? 30,
           prompt_system_template: settings?.prompt_system_template ?? null,
+          parser_provider: settings?.parser_provider,
+          embedding_provider: settings?.embedding_provider,
+          embedding_model: settings?.embedding_model,
+          llm_provider: settings?.llm_provider,
+          llm_model: settings?.llm_model,
         });
       }
       toast.success("RAG Parameters and System Prompt saved securely!");
       fetchAppData(); // Refresh settings
     } catch (e) {
       console.error(e);
-      toast.error("Failed to save settings.");
+      const message =
+        e.response?.data?.error?.message ||
+        e.response?.data?.detail ||
+        "Failed to save settings.";
+      setSettingsSaveError(message);
+      toast.error(message);
     }
   };
 
@@ -1659,6 +1700,178 @@ export default function ApplicationDetail() {
               {!settings && (
                 <div className="text-center py-6 text-slate-400 text-[12px] border border-dashed border-white/[0.08] rounded-card">
                   No settings configured yet. Create settings by submitting this form.
+                </div>
+              )}
+
+              {settingsSaveError && (
+                <div
+                  role="alert"
+                  className="rounded-control border border-red-500/25 bg-red-500/[0.07] p-3 text-[12px] text-red-300"
+                >
+                  {settingsSaveError}
+                </div>
+              )}
+
+              {providerCatalog && (
+                <div className="space-y-5 rounded-card border border-white/[0.06] p-4">
+                  <div>
+                    <h3 className="text-[13px] font-semibold text-white">AI Providers and Models</h3>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Choices are limited to providers and models enabled by the platform.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Field
+                      label="Document Parser"
+                      htmlFor="settings-parser-provider"
+                      hint="Parser selection applies to supported PDF/DOCX modes; other source types keep their dedicated parsers."
+                    >
+                      <Select
+                        id="settings-parser-provider"
+                        value={settings?.parser_provider || ""}
+                        onChange={(e) =>
+                          setSettings({ ...settings, parser_provider: e.target.value })
+                        }
+                        data-testid="settings-parser-provider"
+                      >
+                        {parserOptions.map((option) => (
+                          <option key={option.provider} value={option.provider}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field label="Embedding Provider" htmlFor="settings-embedding-provider">
+                      <Select
+                        id="settings-embedding-provider"
+                        value={settings?.embedding_provider || ""}
+                        disabled={settings?.embedding_change_allowed === false}
+                        onChange={(e) => {
+                          const nextModel = embeddingOptions.find(
+                            (option) => option.provider === e.target.value
+                          )?.model;
+                          setSettings({
+                            ...settings,
+                            embedding_provider: e.target.value,
+                            embedding_model: nextModel || "",
+                          });
+                        }}
+                        data-testid="settings-embedding-provider"
+                      >
+                        {!embeddingProviders.includes(settings?.embedding_provider) &&
+                          settings?.embedding_provider && (
+                            <option value={settings.embedding_provider}>
+                              {settings.embedding_provider} (legacy selection)
+                            </option>
+                          )}
+                        {embeddingProviders.map((provider) => (
+                          <option key={provider} value={provider}>
+                            {provider}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field label="Embedding Model" htmlFor="settings-embedding-model">
+                      <Select
+                        id="settings-embedding-model"
+                        value={settings?.embedding_model || ""}
+                        disabled={settings?.embedding_change_allowed === false}
+                        onChange={(e) =>
+                          setSettings({ ...settings, embedding_model: e.target.value })
+                        }
+                        data-testid="settings-embedding-model"
+                      >
+                        {!selectedEmbeddingModels.some(
+                          (option) => option.model === settings?.embedding_model
+                        ) &&
+                          settings?.embedding_model && (
+                            <option value={settings.embedding_model}>
+                              {settings.embedding_model} (legacy selection)
+                            </option>
+                          )}
+                        {selectedEmbeddingModels.map((option) => (
+                          <option
+                            key={`${option.provider}:${option.model}`}
+                            value={option.model}
+                          >
+                            {option.label} ({option.embedding_dimensions} dimensions)
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field label="LLM Provider" htmlFor="settings-llm-provider">
+                      <Select
+                        id="settings-llm-provider"
+                        value={settings?.llm_provider || ""}
+                        onChange={(e) => {
+                          const nextModel = llmOptions.find(
+                            (option) => option.provider === e.target.value
+                          )?.model;
+                          setSettings({
+                            ...settings,
+                            llm_provider: e.target.value,
+                            llm_model: nextModel || "",
+                          });
+                        }}
+                        data-testid="settings-llm-provider"
+                      >
+                        {!llmProviders.includes(settings?.llm_provider) &&
+                          settings?.llm_provider && (
+                            <option value={settings.llm_provider}>
+                              {settings.llm_provider} (legacy selection)
+                            </option>
+                          )}
+                        {llmProviders.map((provider) => (
+                          <option key={provider} value={provider}>
+                            {provider}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field label="Generation Model" htmlFor="settings-llm-model">
+                      <Select
+                        id="settings-llm-model"
+                        value={settings?.llm_model || ""}
+                        onChange={(e) =>
+                          setSettings({ ...settings, llm_model: e.target.value })
+                        }
+                        data-testid="settings-llm-model"
+                      >
+                        {!selectedLlmModels.some(
+                          (option) => option.model === settings?.llm_model
+                        ) &&
+                          settings?.llm_model && (
+                            <option value={settings.llm_model}>
+                              {settings.llm_model} (legacy selection)
+                            </option>
+                          )}
+                        {selectedLlmModels.map((option) => (
+                          <option
+                            key={`${option.provider}:${option.model}`}
+                            value={option.model}
+                          >
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  </div>
+
+                  {settings?.embedding_change_allowed === false && (
+                    <p
+                      role="status"
+                      className="rounded-control border border-amber-500/25 bg-amber-500/[0.07] p-3 text-[11px] text-amber-200"
+                      data-testid="embedding-change-warning"
+                    >
+                      This application has published document vectors. Its embedding provider and model
+                      cannot be changed until application-wide re-embedding support is available.
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -3,12 +3,18 @@ from __future__ import annotations
 import os
 import secrets
 from collections.abc import Generator
+from dataclasses import replace
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
+from app.config.provider_registry import (
+    build_provider_catalog,
+    resolve_application_selection,
+)
+from app.core.exceptions import ConfigurationError
 from app.infrastructure.observability.tracing import TracedLlmProvider
 from app.infrastructure.providers.embeddings.factory import (
     build_embeddings_provider,
@@ -92,6 +98,7 @@ from app.modules.knowledge_bases.infrastructure.repositories import (
 from app.modules.question_answering.application.services import (
     ChatApplicationService,
 )
+from app.modules.settings.domain.entities import PlatformSettings
 from app.modules.settings.application.services import SettingsApplicationService
 from app.modules.settings.infrastructure.repositories import (
     SqlAlchemySettingsRepository,
@@ -240,14 +247,19 @@ def get_widget_application_service(
 
 
 def get_settings_application_service(
+    request: Request,
     session: Session = Depends(get_session),
 ) -> SettingsApplicationService:
+    settings = get_settings(request)
     return SettingsApplicationService(
         settings_repository=(
             SqlAlchemySettingsRepository(
                 session=session,
+                vector_store_table_name=settings.vector_store_table_name,
             )
         ),
+        platform_settings=settings,
+        provider_catalog=build_provider_catalog(settings),
     )
 
 
@@ -268,32 +280,65 @@ def get_conversation_application_service(
     )
 
 
-def get_question_answering_pipeline(
-    request: Request,
-    session: Session = Depends(get_session),
-    ) -> QuestionAnsweringPipeline:
-    settings = get_settings(request)
-    trace_observer = request.app.state.trace_observer
-
-
-    embeddings_provider = build_embeddings_provider(settings)
-
-
-    if settings.providers.llm.strip().lower() == "openrouter":
-        llm_provider = OpenRouterLlmProvider(
-            settings=settings.openrouter,
+def _build_llm_provider(
+    settings: Settings,
+    *,
+    provider_name: str,
+    model_name: str | None,
+):
+    normalized_provider = provider_name.strip().lower()
+    if normalized_provider == "openrouter":
+        llm_settings = replace(
+            settings.openrouter,
+            model=model_name or settings.openrouter.model,
+        )
+        return OpenRouterLlmProvider(
+            settings=llm_settings,
             fallback_models=settings.openrouter.fallback_models,
-    )
-    else:
-        llm_provider = OllamaLlmProvider(
-            settings=settings.ollama,
+        )
+    if normalized_provider == "ollama":
+        llm_settings = replace(
+            settings.ollama,
+            llm_model_name=model_name or settings.ollama.llm_model_name,
+        )
+        return OllamaLlmProvider(settings=llm_settings)
+    raise ConfigurationError(
+        f"Unsupported LLM_PROVIDER value: {normalized_provider!r}."
     )
 
+
+def build_question_answering_pipeline(
+    *,
+    settings: Settings,
+    session: Session,
+    application_settings: PlatformSettings | None,
+    trace_observer,
+) -> QuestionAnsweringPipeline:
+    embedding_provider_name, embedding_model_name = resolve_application_selection(
+        settings,
+        application_settings,
+        capability="embedding",
+    )
+    embeddings_provider = build_embeddings_provider(
+        settings,
+        provider_name=embedding_provider_name,
+        model_name=embedding_model_name,
+    )
+
+    llm_provider_name, llm_model_name = resolve_application_selection(
+        settings,
+        application_settings,
+        capability="llm",
+    )
+    llm_provider = _build_llm_provider(
+        settings,
+        provider_name=llm_provider_name,
+        model_name=llm_model_name,
+    )
     traced_llm_provider = TracedLlmProvider(
-    provider=llm_provider,
-    trace_observer=trace_observer,
+        provider=llm_provider,
+        trace_observer=trace_observer,
     )
-
     vector_provider = PgVectorProvider(
         settings=settings,
         session=session,
@@ -306,6 +351,7 @@ def get_question_answering_pipeline(
         query_embedder=(
             QueryEmbedder(
                 embeddings_contract=embeddings_provider,
+                expected_dimension=settings.vector_store_dimension,
             )
         ),
         hybrid_retriever=(
@@ -339,15 +385,38 @@ def get_question_answering_pipeline(
     )
 
 
+def get_question_answering_pipeline(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> QuestionAnsweringPipeline:
+    return build_question_answering_pipeline(
+        settings=get_settings(request),
+        session=session,
+        application_settings=None,
+        trace_observer=request.app.state.trace_observer,
+    )
+
+
 def get_chat_application_service(
+        request: Request,
         session: Session = Depends(get_session),
         conversation_service: ConversationApplicationService = Depends(
         get_conversation_application_service,
         ),
-        question_answering_pipeline: QuestionAnsweringPipeline = Depends(
-        get_question_answering_pipeline,
-        ),
         ) -> ChatApplicationService:
+    settings = get_settings(request)
+    trace_observer = request.app.state.trace_observer
+
+    def pipeline_factory(
+        application_settings: PlatformSettings | None,
+    ) -> QuestionAnsweringPipeline:
+        return build_question_answering_pipeline(
+            settings=settings,
+            session=session,
+            application_settings=application_settings,
+            trace_observer=trace_observer,
+        )
+
     return ChatApplicationService(
         knowledge_base_repository=(
             SqlAlchemyKnowledgeBaseRepository(
@@ -361,11 +430,10 @@ def get_chat_application_service(
         ),
         settings_repository=SqlAlchemySettingsRepository(
             session=session,
+            vector_store_table_name=settings.vector_store_table_name,
         ),
         conversation_service=conversation_service,
-        question_answering_pipeline=(
-            question_answering_pipeline
-        ),
+        question_answering_pipeline_factory=pipeline_factory,
     )
 
 
@@ -386,6 +454,7 @@ def build_knowledge_ingestion_pipeline(
     source_type: str,
     settings: Settings,
     session: Session,
+    application_settings: PlatformSettings | None = None,
 ) -> KnowledgeIngestionPipeline:
 
     storage_provider = SupabaseStorageProvider(
@@ -393,7 +462,16 @@ def build_knowledge_ingestion_pipeline(
     )
 
 
-    embeddings_provider = build_embeddings_provider(settings)
+    embedding_provider_name, embedding_model_name = resolve_application_selection(
+        settings,
+        application_settings,
+        capability="embedding",
+    )
+    embeddings_provider = build_embeddings_provider(
+        settings,
+        provider_name=embedding_provider_name,
+        model_name=embedding_model_name,
+    )
 
     vector_provider = PgVectorProvider(
         settings=settings,
@@ -404,7 +482,11 @@ def build_knowledge_ingestion_pipeline(
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
-        parser_provider = settings.providers.parser.strip().lower()
+        parser_provider = resolve_application_selection(
+            settings,
+            application_settings,
+            capability="parser",
+        )[0].strip().lower()
         if parser_provider == "auto":
             if source_type == "pdf":
                 parser = QualityAwareDocumentParser(
@@ -504,10 +586,15 @@ def build_knowledge_ingestion_pipeline(
         parser=parser,
         normalizer=DocumentNormalizer(),
         chunk_generator=IntelligentChunkGenerator(),
-        metadata_enricher=MetadataEnricher(),
+        metadata_enricher=MetadataEnricher(
+            embedding_provider=embedding_provider_name,
+            embedding_model=embedding_model_name,
+            embedding_dimensions=settings.vector_store_dimension,
+        ),
         embedding_generator=(
             EmbeddingGenerator(
                 embeddings_contract=embeddings_provider,
+                expected_dimension=settings.vector_store_dimension,
             )
         ),
         vector_indexer=(

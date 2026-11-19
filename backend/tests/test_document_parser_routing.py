@@ -1,4 +1,5 @@
 from io import BytesIO
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 
@@ -39,16 +40,7 @@ from app.knowledge_engine.shared.models import (
 
 
 def _pipeline_for(source_type: str):
-    settings = SimpleNamespace(
-        providers=SimpleNamespace(
-            embeddings="nomic",
-            parser="native",
-        ),
-        storage=SimpleNamespace(),
-        openrouter=SimpleNamespace(),
-        vector_store_table_name="chunks",
-        vector_store_dimension=3,
-    )
+    settings = _pipeline_settings("native")
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(settings=settings))
     )
@@ -147,13 +139,7 @@ def test_parser_provider_setting_is_normalized_and_rejected_when_unknown(
 
 
 def _pipeline_for_provider(source_type: str, parser_provider: str):
-    settings = SimpleNamespace(
-        providers=SimpleNamespace(embeddings="nomic", parser=parser_provider),
-        storage=SimpleNamespace(),
-        openrouter=SimpleNamespace(),
-        vector_store_table_name="chunks",
-        vector_store_dimension=3,
-    )
+    settings = _pipeline_settings(parser_provider)
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(settings=settings))
     )
@@ -161,6 +147,20 @@ def _pipeline_for_provider(source_type: str, parser_provider: str):
         source_type=source_type,
         request=request,
         session=object(),
+    )
+
+
+def _pipeline_settings(parser_provider: str):
+    settings = load_settings()
+    return replace(
+        settings,
+        providers=replace(
+            settings.providers,
+            embeddings="nomic",
+            parser=parser_provider,
+        ),
+        vector_store_table_name="chunks",
+        vector_store_dimension=3,
     )
 
 

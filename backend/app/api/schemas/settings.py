@@ -12,6 +12,11 @@ class CreateSettingsRequest(BaseModel):
     inactivity_timeout_minutes: int = Field(default=30, ge=1, le=10080)
     retention_days: int = Field(default=30, ge=1, le=3650)
     prompt_system_template: str | None = Field(default=None, max_length=10000)
+    parser_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    embedding_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -20,6 +25,11 @@ class UpdateSettingsRequest(BaseModel):
     inactivity_timeout_minutes: int = Field(..., ge=1, le=10080)
     retention_days: int = Field(..., ge=1, le=3650)
     prompt_system_template: str | None = Field(default=None, max_length=10000)
+    parser_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    embedding_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class SettingsResponse(BaseModel):
@@ -30,5 +40,24 @@ class SettingsResponse(BaseModel):
     inactivity_timeout_minutes: int
     retention_days: int
     prompt_system_template: str | None
+    parser_provider: str | None
+    embedding_provider: str | None
+    embedding_model: str | None
+    llm_provider: str | None
+    llm_model: str | None
+    embedding_change_allowed: bool = True
     created_at: datetime
     updated_at: datetime
+
+
+class ProviderModelOptionResponse(BaseModel):
+    provider: str
+    model: str | None
+    label: str
+    embedding_dimensions: int | None = None
+
+
+class ProviderCatalogResponse(BaseModel):
+    parsers: list[ProviderModelOptionResponse]
+    embeddings: list[ProviderModelOptionResponse]
+    llms: list[ProviderModelOptionResponse]

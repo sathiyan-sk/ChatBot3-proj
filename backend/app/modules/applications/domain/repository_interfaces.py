@@ -51,7 +51,16 @@ class ApplicationProvisioningRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def create_default_settings(self, *, application_id: str) -> None:
+    def create_default_settings(
+        self,
+        *,
+        application_id: str,
+        parser_provider: str,
+        embedding_provider: str,
+        embedding_model: str,
+        llm_provider: str,
+        llm_model: str,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod

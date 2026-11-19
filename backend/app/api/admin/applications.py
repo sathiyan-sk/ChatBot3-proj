@@ -37,6 +37,7 @@ def _build_application_services(
         session=session,
         application_repository=ApplicationSqlAlchemyRepository(session),
         provisioning_repository=ApplicationProvisioningSqlAlchemyRepository(session),
+        platform_settings=container.settings,
     )
 
     return session, service

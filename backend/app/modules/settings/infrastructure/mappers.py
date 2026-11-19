@@ -13,6 +13,11 @@ def map_settings_model_to_entity(model: SettingsModel) -> PlatformSettings:
         inactivity_timeout_minutes=model.inactivity_timeout_minutes,
         retention_days=model.retention_days,
         prompt_system_template=model.prompt_system_template,
+        parser_provider=model.parser_provider,
+        embedding_provider=model.embedding_provider,
+        embedding_model=model.embedding_model,
+        llm_provider=model.llm_provider,
+        llm_model=model.llm_model,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

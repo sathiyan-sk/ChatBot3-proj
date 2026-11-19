@@ -287,7 +287,7 @@ def load_settings() -> Settings:
             ),
             embedding_model_name=os.getenv(
                 "EMBEDDING_MODEL_NAME",
-                "nomic-embed-text",
+                "mxbai-embed-large",
             ),
             llm_model_name=os.getenv(
                 "LLM_MODEL_NAME",

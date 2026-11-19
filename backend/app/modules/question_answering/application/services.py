@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from collections.abc import Callable
 
 from app.core.exceptions import ApplicationError
 from app.knowledge_engine.pipelines.question_answering_pipeline import QuestionAnsweringPipeline
@@ -18,6 +19,7 @@ from app.modules.conversations.application.services import ConversationApplicati
 from app.modules.documents.domain.repository_interfaces import DocumentRepositoryInterface
 from app.modules.knowledge_bases.domain.repository_interfaces import KnowledgeBaseRepositoryInterface
 from app.modules.settings.domain.repository_interfaces import SettingsRepositoryInterface
+from app.modules.settings.domain.entities import PlatformSettings
 
 
 @dataclass(slots=True)
@@ -26,7 +28,10 @@ class ChatApplicationService:
     document_repository: DocumentRepositoryInterface
     settings_repository: SettingsRepositoryInterface
     conversation_service: ConversationApplicationService
-    question_answering_pipeline: QuestionAnsweringPipeline
+    question_answering_pipeline_factory: Callable[
+        [PlatformSettings | None],
+        QuestionAnsweringPipeline,
+    ]
 
     def ask(self, command: AskChatQuestionCommand) -> AskChatQuestionResultDto:
         message_text = command.message_text.strip()
@@ -101,7 +106,10 @@ class ChatApplicationService:
     )
 )
 
-        pipeline_result = self.question_answering_pipeline.run(
+        question_answering_pipeline = self.question_answering_pipeline_factory(
+            application_settings
+        )
+        pipeline_result = question_answering_pipeline.run(
             QuestionAnsweringPipelineRequest(
                 application_id=command.application_id,
                 knowledge_base_id=knowledge_base.id,

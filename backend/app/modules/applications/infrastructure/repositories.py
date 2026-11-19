@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -124,18 +125,32 @@ class ApplicationProvisioningSqlAlchemyRepository(ApplicationProvisioningReposit
         self._session.add(model)
         self._session.flush()
 
-    def create_default_settings(self, *, application_id: str) -> None:
+    def create_default_settings(
+        self,
+        *,
+        application_id: str,
+        parser_provider: str,
+        embedding_provider: str,
+        embedding_model: str,
+        llm_provider: str,
+        llm_model: str,
+    ) -> None:
         default_retention_days = max(
             1,
             int(os.getenv("CHAT_HISTORY_RETENTION_DAYS", "30")),
         )
         model = SettingsModel(
-            application_id=application_id,
+            application_id=UUID(str(application_id)),
             llm_temperature="0.2",
             max_context_messages=12,
             inactivity_timeout_minutes=30,
             retention_days=default_retention_days,
             prompt_system_template=None,
+            parser_provider=parser_provider,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
         )
         self._session.add(model)
         self._session.flush()
