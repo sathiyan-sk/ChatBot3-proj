@@ -28,6 +28,12 @@ _PARSER_OPTIONS = (
 
 _EMBEDDING_OPTIONS = (
     ProviderModelOption(
+        "nvidia",
+        "nvidia/nv-embedqa-e5-v5",
+        "NVIDIA NV-EmbedQA-E5-v5",
+        embedding_dimensions=1024,
+    ),
+    ProviderModelOption(
         "openrouter",
         "qwen/qwen3-embedding-8b",
         "Qwen3 Embedding 8B",
@@ -53,14 +59,6 @@ _EMBEDDING_OPTIONS = (
     ),
 )
 
-_LLM_OPTIONS = (
-    ProviderModelOption("openrouter", "google/gemma-4-26b-a4b-it:free", "Gemma 4 26B"),
-    ProviderModelOption("openrouter", "qwen/qwen-2.5-7b-instruct", "Qwen 2.5 7B Instruct"),
-    ProviderModelOption("ollama", "qwen2.5:3b", "Qwen 2.5 3B"),
-    ProviderModelOption("ollama", "qwen2.5:7b", "Qwen 2.5 7B"),
-)
-
-
 @dataclass(frozen=True, slots=True)
 class ActiveProviders:
     llm: str
@@ -80,29 +78,47 @@ def build_active_providers(settings: ProviderSettings) -> ActiveProviders:
 
 def build_provider_catalog(settings: Settings) -> ProviderCatalog:
     enabled_llm_providers = {"ollama"}
+    if settings.openai_llm.api_key.strip():
+        enabled_llm_providers.add("openai")
+    if settings.gemini.api_key.strip():
+        enabled_llm_providers.add("gemini")
     if settings.openrouter.api_key.strip():
         enabled_llm_providers.add("openrouter")
+    if settings.huggingface.token.strip():
+        enabled_llm_providers.add("huggingface")
+    if settings.nvidia.api_key.strip():
+        enabled_llm_providers.add("nvidia")
 
-    llm_options = [
-        option for option in _LLM_OPTIONS if option.provider in enabled_llm_providers
-    ]
-    configured_llm_models = []
-    llm_provider = settings.providers.llm.strip().lower()
-    if llm_provider == "openrouter" and "openrouter" in enabled_llm_providers:
-        configured_llm_models = [
+    configured_models_by_provider = {
+        "ollama": (
+            *settings.ollama.llm_models,
+            settings.ollama.llm_model_name,
+        ),
+        "openrouter": (
+            *settings.openrouter.models,
             settings.openrouter.model,
-            *settings.openrouter.fallback_models,
-        ]
-    elif llm_provider == "ollama":
-        configured_llm_models = [settings.ollama.llm_model_name]
-    for model in configured_llm_models:
-        if model and not any(
-            option.provider == llm_provider and option.model == model
-            for option in llm_options
-        ):
-            llm_options.append(
-                ProviderModelOption(llm_provider, model, model)
-            )
+        ),
+        "openai": (*settings.openai_llm.models, settings.openai_llm.model),
+        "gemini": (*settings.gemini.models, settings.gemini.model),
+        "huggingface": (
+            *settings.huggingface.llm_models,
+            settings.huggingface.llm_model,
+        ),
+        "nvidia": (*settings.nvidia.models, settings.nvidia.model),
+    }
+    llm_options = []
+    seen_llm_options: set[tuple[str, str]] = set()
+    for provider, models in configured_models_by_provider.items():
+        if provider not in enabled_llm_providers:
+            continue
+        for model in models:
+            normalized_model = model.strip()
+            option_key = (provider, normalized_model)
+            if normalized_model and option_key not in seen_llm_options:
+                llm_options.append(
+                    ProviderModelOption(provider, normalized_model, normalized_model)
+                )
+                seen_llm_options.add(option_key)
 
     enabled_embedding_providers = {"ollama"}
     if settings.openrouter.api_key.strip():
@@ -111,6 +127,8 @@ def build_provider_catalog(settings: Settings) -> ProviderCatalog:
         enabled_embedding_providers.add("huggingface")
     if settings.openai_embeddings.api_key.strip():
         enabled_embedding_providers.add("openai")
+    if settings.nvidia.api_key.strip():
+        enabled_embedding_providers.add("nvidia")
 
     embedding_options = [
         option
@@ -127,6 +145,11 @@ def build_provider_catalog(settings: Settings) -> ProviderCatalog:
             "openai",
             settings.openai_embeddings.embedding_model,
             settings.openai_embeddings.embedding_dimensions,
+        ),
+        (
+            "nvidia",
+            settings.nvidia.embedding_model,
+            1024,
         ),
     )
     if (
@@ -152,6 +175,10 @@ def build_provider_catalog(settings: Settings) -> ProviderCatalog:
             provider in enabled_embedding_providers
             and dimensions == settings.vector_store_dimension
             and model
+            and (
+                provider != "nvidia"
+                or model == "nvidia/nv-embedqa-e5-v5"
+            )
             and not any(
                 option.provider == provider and option.model == model
                 for option in embedding_options
@@ -205,11 +232,14 @@ def platform_default_selection(
         return settings.providers.parser, None
     if capability == "llm":
         provider = settings.providers.llm.strip().lower()
-        model = (
-            settings.openrouter.model
-            if provider == "openrouter"
-            else settings.ollama.llm_model_name
-        )
+        models = {
+            "openrouter": settings.openrouter.model,
+            "openai": settings.openai_llm.model,
+            "gemini": settings.gemini.model,
+            "huggingface": settings.huggingface.llm_model,
+            "nvidia": settings.nvidia.model,
+        }
+        model = models.get(provider, settings.ollama.llm_model_name)
         return provider, model
     if capability == "embedding":
         provider = settings.providers.embeddings.strip().lower()
@@ -221,6 +251,8 @@ def platform_default_selection(
             model = settings.huggingface.embedding_model
         elif provider == "openai":
             model = settings.openai_embeddings.embedding_model
+        elif provider == "nvidia":
+            model = settings.nvidia.embedding_model
         else:
             model = settings.ollama.embedding_model_name
         return provider, model

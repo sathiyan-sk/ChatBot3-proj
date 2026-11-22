@@ -20,13 +20,17 @@ from app.config.provider_registry import (
 from app.config.settings import (
     AppSettings,
     DatabaseSettings,
+    GeminiSettings,
     HuggingFaceSettings,
     OllamaSettings,
     OpenAIEmbeddingsSettings,
+    OpenAILlmSettings,
     OpenRouterSettings,
+    NvidiaSettings,
     ProviderSettings,
     Settings,
     StorageSettings,
+    load_settings,
 )
 from app.core.exceptions import ApplicationError
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
@@ -60,7 +64,13 @@ def _platform_settings(
             parser="native",
         ),
         storage=StorageSettings("", "", "", 1),
-        ollama=OllamaSettings("http://localhost", "mxbai-embed-large", "qwen2.5:7b", 1),
+        ollama=OllamaSettings(
+            "http://localhost",
+            "mxbai-embed-large",
+            "qwen2.5:7b",
+            1,
+            ("qwen2.5:3b", "qwen2.5:7b"),
+        ),
         openrouter=OpenRouterSettings(
             "https://example.invalid",
             "",
@@ -69,8 +79,46 @@ def _platform_settings(
             1,
             "qwen/qwen3-embedding-8b",
             1024,
+            models=(
+                "google/gemma-4-26b-a4b-it:free",
+                "qwen/qwen-2.5-7b-instruct",
+            ),
         ),
-        huggingface=HuggingFaceSettings("", "BAAI/bge-large-en-v1.5", "hf-inference", 1, 1),
+        openai_llm=OpenAILlmSettings(
+            "https://example.invalid/v1",
+            openai_api_key,
+            "gpt-4.1-mini",
+            0.2,
+            1,
+            ("gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"),
+        ),
+        gemini=GeminiSettings(
+            "https://example.invalid/v1beta",
+            "",
+            "gemini-2.5-flash",
+            0.2,
+            1,
+            ("gemini-2.5-flash", "gemini-2.5-pro"),
+        ),
+        huggingface=HuggingFaceSettings(
+            "",
+            "BAAI/bge-large-en-v1.5",
+            "Qwen/Qwen2.5-7B-Instruct-1M",
+            "hf-inference",
+            1,
+            1,
+            ("Qwen/Qwen2.5-7B-Instruct-1M", "google/gemma-2-2b-it"),
+        ),
+        nvidia=NvidiaSettings(
+            "",
+            "https://integrate.api.nvidia.com/v1",
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
+            1,
+            models=(
+                "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "nvidia/nemotron-3.5-super-120b-a12b",
+            ),
+        ),
         openai_embeddings=OpenAIEmbeddingsSettings(
             "https://example.invalid/v1",
             openai_api_key,
@@ -199,6 +247,100 @@ def test_provider_catalog_only_exposes_enabled_models_with_supported_dimensions(
         "openai",
     }
     assert "openrouter" in {option.provider for option in enabled_catalog.llms}
+    assert "huggingface" in {option.provider for option in enabled_catalog.llms}
+    assert "openai" not in {option.provider for option in enabled_catalog.llms}
+    assert "gemini" not in {option.provider for option in enabled_catalog.llms}
+    assert "nvidia" not in {option.provider for option in enabled_catalog.llms}
+    cloud_llm_settings = replace(
+        settings,
+        openai_llm=replace(settings.openai_llm, api_key="configured"),
+        gemini=replace(settings.gemini, api_key="configured"),
+    )
+    cloud_llm_catalog = build_provider_catalog(cloud_llm_settings)
+    assert {
+        option.provider for option in cloud_llm_catalog.llms
+    } >= {"openai", "gemini"}
+    assert {
+        option.model
+        for option in cloud_llm_catalog.llms
+        if option.provider == "openai"
+    } == {"gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"}
+    assert {
+        option.model
+        for option in cloud_llm_catalog.llms
+        if option.provider == "gemini"
+    } == {"gemini-2.5-flash", "gemini-2.5-pro"}
+    configured_model_settings = replace(
+        settings,
+        ollama=replace(
+            settings.ollama,
+            llm_models=("qwen2.5:7b", "deployment-approved-ollama-model"),
+        ),
+        openrouter=replace(
+            settings.openrouter,
+            api_key="configured",
+            models=("google/gemma-4-26b-a4b-it:free", "approved-openrouter-model"),
+        ),
+        openai_llm=replace(
+            settings.openai_llm,
+            api_key="configured",
+            models=("gpt-4.1-mini", "deployment-approved-model"),
+        ),
+        gemini=replace(
+            settings.gemini,
+            api_key="configured",
+            models=("gemini-2.5-flash", "deployment-approved-gemini-model"),
+        ),
+        huggingface=replace(
+            settings.huggingface,
+            token="configured",
+            llm_models=(
+                "Qwen/Qwen2.5-7B-Instruct-1M",
+                "deployment-approved-huggingface-model",
+            ),
+        ),
+        nvidia=replace(
+            settings.nvidia,
+            api_key="configured",
+            models=(
+                "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "deployment-approved-nvidia-model",
+            ),
+        ),
+    )
+    configured_model_catalog = build_provider_catalog(configured_model_settings)
+    assert "deployment-approved-model" in {
+        option.model
+        for option in configured_model_catalog.llms
+        if option.provider == "openai"
+    }
+    assert "deployment-approved-gemini-model" in {
+        option.model
+        for option in configured_model_catalog.llms
+        if option.provider == "gemini"
+    }
+    for provider, model in (
+        ("ollama", "deployment-approved-ollama-model"),
+        ("openrouter", "approved-openrouter-model"),
+        ("huggingface", "deployment-approved-huggingface-model"),
+        ("nvidia", "deployment-approved-nvidia-model"),
+    ):
+        assert model in {
+            option.model
+            for option in configured_model_catalog.llms
+            if option.provider == provider
+        }
+    nvidia_enabled_settings = replace(
+        settings,
+        nvidia=replace(settings.nvidia, api_key="configured"),
+    )
+    nvidia_catalog = build_provider_catalog(nvidia_enabled_settings)
+    assert {
+        option.model for option in nvidia_catalog.llms if option.provider == "nvidia"
+    } == {
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "nvidia/nemotron-3.5-super-120b-a12b",
+    }
     assert all(
         option.embedding_dimensions == enabled_settings.vector_store_dimension
         for option in enabled_catalog.embeddings
@@ -224,6 +366,58 @@ def test_provider_catalog_only_exposes_enabled_models_with_supported_dimensions(
         provider="openai",
         model="unsupported-model",
     )
+    assert not is_supported_selection(
+        default_catalog,
+        capability="llm",
+        provider="huggingface",
+        model="Qwen/Qwen2.5-7B-Instruct-1M",
+    )
+
+
+def test_llm_catalog_uses_backend_configured_models_for_every_provider(monkeypatch):
+    configured_environment = {
+        "LLM_MODEL_NAME": "ollama-default",
+        "OLLAMA_LLM_MODELS": "ollama-one,ollama-two",
+        "OPENROUTER_API_KEY": "configured",
+        "OPENROUTER_MODEL": "openrouter-default",
+        "OPENROUTER_MODELS": "openrouter-one,openrouter-two",
+        "OPENAI_API_KEY": "configured",
+        "OPENAI_LLM_MODEL": "openai-default",
+        "OPENAI_LLM_MODELS": "openai-one,openai-two",
+        "GEMINI_API_KEY": "configured",
+        "GEMINI_MODEL": "gemini-default",
+        "GEMINI_MODELS": "gemini-one,gemini-two",
+        "HF_TOKEN": "configured",
+        "HF_LLM_MODEL": "huggingface-default",
+        "HF_LLM_MODELS": "huggingface-one,huggingface-two",
+        "NVIDIA_API_KEY": "configured",
+        "NVIDIA_MODEL": "nvidia-default",
+        "NVIDIA_MODELS": "nvidia-one,nvidia-two",
+    }
+    for name, value in configured_environment.items():
+        monkeypatch.setenv(name, value)
+
+    catalog = build_provider_catalog(load_settings())
+    expected_models = {
+        "ollama": {"ollama-one", "ollama-two", "ollama-default"},
+        "openrouter": {
+            "openrouter-one",
+            "openrouter-two",
+            "openrouter-default",
+        },
+        "openai": {"openai-one", "openai-two", "openai-default"},
+        "gemini": {"gemini-one", "gemini-two", "gemini-default"},
+        "huggingface": {
+            "huggingface-one",
+            "huggingface-two",
+            "huggingface-default",
+        },
+        "nvidia": {"nvidia-one", "nvidia-two", "nvidia-default"},
+    }
+    for provider, models in expected_models.items():
+        assert {
+            option.model for option in catalog.llms if option.provider == provider
+        } == models
 
 
 def test_application_selection_overrides_only_requested_capabilities():
@@ -250,6 +444,24 @@ def test_application_selection_overrides_only_requested_capabilities():
         application_settings,
         capability="llm",
     ) == ("ollama", "qwen2.5:3b")
+    huggingface_settings = SimpleNamespace(
+        llm_provider="huggingface",
+        llm_model="google/gemma-2-2b-it",
+    )
+    assert resolve_application_selection(
+        settings,
+        huggingface_settings,
+        capability="llm",
+    ) == ("huggingface", "google/gemma-2-2b-it")
+    nvidia_settings = SimpleNamespace(
+        llm_provider="nvidia",
+        llm_model="nvidia/nemotron-3.5-super-120b-a12b",
+    )
+    assert resolve_application_selection(
+        settings,
+        nvidia_settings,
+        capability="llm",
+    ) == ("nvidia", "nvidia/nemotron-3.5-super-120b-a12b")
 
 
 def _create_application(session: Session, settings: Settings) -> str:

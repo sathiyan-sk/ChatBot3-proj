@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import Settings
 from app.config.provider_registry import (
     build_provider_catalog,
+    is_supported_selection,
     resolve_application_selection,
 )
 from app.core.exceptions import ConfigurationError
@@ -20,6 +21,12 @@ from app.infrastructure.providers.embeddings.factory import (
     build_embeddings_provider,
 )
 from app.infrastructure.providers.llm.ollama_provider import OllamaLlmProvider
+from app.infrastructure.providers.llm.huggingface_provider import (
+    HuggingFaceLlmProvider,
+)
+from app.infrastructure.providers.llm.gemini_provider import GeminiLlmProvider
+from app.infrastructure.providers.llm.nvidia_provider import NvidiaLlmProvider
+from app.infrastructure.providers.llm.openai_provider import OpenAILlmProvider
 from app.infrastructure.providers.llm.openrouter_provider import (
     OpenRouterLlmProvider,
 )
@@ -287,21 +294,53 @@ def _build_llm_provider(
     model_name: str | None,
 ):
     normalized_provider = provider_name.strip().lower()
+    model_catalog = build_provider_catalog(settings)
+    if not is_supported_selection(
+        model_catalog,
+        capability="llm",
+        provider=normalized_provider,
+        model=model_name,
+    ):
+        raise ConfigurationError(
+            "The selected LLM provider/model is not enabled by the platform "
+            f"configuration: {normalized_provider!r}/{model_name!r}."
+        )
     if normalized_provider == "openrouter":
         llm_settings = replace(
             settings.openrouter,
             model=model_name or settings.openrouter.model,
         )
-        return OpenRouterLlmProvider(
-            settings=llm_settings,
-            fallback_models=settings.openrouter.fallback_models,
-        )
+        return OpenRouterLlmProvider(settings=llm_settings)
     if normalized_provider == "ollama":
         llm_settings = replace(
             settings.ollama,
             llm_model_name=model_name or settings.ollama.llm_model_name,
         )
         return OllamaLlmProvider(settings=llm_settings)
+    if normalized_provider == "openai":
+        llm_settings = replace(
+            settings.openai_llm,
+            model=model_name or settings.openai_llm.model,
+        )
+        return OpenAILlmProvider(settings=llm_settings)
+    if normalized_provider == "gemini":
+        llm_settings = replace(
+            settings.gemini,
+            model=model_name or settings.gemini.model,
+        )
+        return GeminiLlmProvider(settings=llm_settings)
+    if normalized_provider == "huggingface":
+        llm_settings = replace(
+            settings.huggingface,
+            llm_model=model_name or settings.huggingface.llm_model,
+        )
+        return HuggingFaceLlmProvider(settings=llm_settings)
+    if normalized_provider == "nvidia":
+        llm_settings = replace(
+            settings.nvidia,
+            model=model_name or settings.nvidia.model,
+        )
+        return NvidiaLlmProvider(settings=llm_settings)
     raise ConfigurationError(
         f"Unsupported LLM_PROVIDER value: {normalized_provider!r}."
     )

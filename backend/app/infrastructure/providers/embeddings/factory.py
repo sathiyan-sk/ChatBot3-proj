@@ -8,6 +8,9 @@ from app.infrastructure.providers.embeddings.huggingface_embeddings_provider imp
     HuggingFaceEmbeddingsProvider,
 )
 from app.infrastructure.providers.embeddings.nomic_provider import NomicEmbeddingsProvider
+from app.infrastructure.providers.embeddings.nvidia_embeddings_provider import (
+    NvidiaEmbeddingsProvider,
+)
 from app.infrastructure.providers.embeddings.openai_embeddings_provider import (
     OpenAIEmbeddingsProvider,
 )
@@ -51,6 +54,12 @@ def build_embeddings_provider(
         )
         return OpenAIEmbeddingsProvider(
             settings=provider_settings,
+            vector_dimension=settings.vector_store_dimension,
+        )
+    if provider_name == "nvidia":
+        return NvidiaEmbeddingsProvider(
+            settings=settings.nvidia,
+            model_name=model_name or settings.nvidia.embedding_model,
             vector_dimension=settings.vector_store_dimension,
         )
     if provider_name in {"ollama", "nomic"}:

@@ -14,6 +14,7 @@ def _settings(*, batch_size: int = 2) -> HuggingFaceSettings:
     return HuggingFaceSettings(
         token="hf-test-token",
         embedding_model="BAAI/bge-large-en-v1.5",
+        llm_model="Qwen/Qwen2.5-7B-Instruct-1M",
         inference_provider="hf-inference",
         provider_timeout_seconds=10,
         embedding_batch_size=batch_size,
@@ -95,6 +96,7 @@ def test_huggingface_embeddings_require_token():
     settings = HuggingFaceSettings(
         token="",
         embedding_model="BAAI/bge-large-en-v1.5",
+        llm_model="Qwen/Qwen2.5-7B-Instruct-1M",
         inference_provider="hf-inference",
         provider_timeout_seconds=10,
         embedding_batch_size=2,

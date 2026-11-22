@@ -9,6 +9,12 @@ from app.infrastructure.providers.embeddings.factory import (
     build_embeddings_provider,
 )
 from app.infrastructure.providers.llm.ollama_provider import OllamaLlmProvider
+from app.infrastructure.providers.llm.gemini_provider import GeminiLlmProvider
+from app.infrastructure.providers.llm.huggingface_provider import (
+    HuggingFaceLlmProvider,
+)
+from app.infrastructure.providers.llm.nvidia_provider import NvidiaLlmProvider
+from app.infrastructure.providers.llm.openai_provider import OpenAILlmProvider
 from app.infrastructure.providers.llm.openrouter_provider import OpenRouterLlmProvider
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
 from app.modules.applications.infrastructure.repositories import (
@@ -27,10 +33,15 @@ from app.knowledge_engine.pipelines.question_answering_pipeline import QuestionA
 
 def _select_llm_provider(settings: Settings):
     if settings.providers.llm.strip().lower() == "openrouter":
-        return OpenRouterLlmProvider(
-            settings=settings.openrouter,
-            fallback_models=settings.openrouter.fallback_models,
-        )
+        return OpenRouterLlmProvider(settings=settings.openrouter)
+    if settings.providers.llm.strip().lower() == "openai":
+        return OpenAILlmProvider(settings=settings.openai_llm)
+    if settings.providers.llm.strip().lower() == "gemini":
+        return GeminiLlmProvider(settings=settings.gemini)
+    if settings.providers.llm.strip().lower() == "huggingface":
+        return HuggingFaceLlmProvider(settings=settings.huggingface)
+    if settings.providers.llm.strip().lower() == "nvidia":
+        return NvidiaLlmProvider(settings=settings.nvidia)
     return OllamaLlmProvider(settings=settings.ollama)
 
 

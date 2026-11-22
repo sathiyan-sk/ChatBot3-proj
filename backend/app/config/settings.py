@@ -39,6 +39,7 @@ class OllamaSettings:
     embedding_model_name: str
     llm_model_name: str
     provider_timeout_seconds: float
+    llm_models: tuple[str, ...] = ()
 
 @dataclass(slots=True, frozen=True)
 class OpenRouterSettings:
@@ -49,17 +50,50 @@ class OpenRouterSettings:
     provider_timeout_seconds: float
     embedding_model: str
     embedding_dimensions: int
-    fallback_models: tuple[str, ...] = ()
     embedding_batch_size: int = 64
+    models: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class OpenAILlmSettings:
+    base_url: str
+    api_key: str
+    model: str
+    temperature: float
+    provider_timeout_seconds: float
+    models: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class GeminiSettings:
+    base_url: str
+    api_key: str
+    model: str
+    temperature: float
+    provider_timeout_seconds: float
+    models: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
 class HuggingFaceSettings:
     token: str
     embedding_model: str
+    llm_model: str
     inference_provider: str
     provider_timeout_seconds: float
     embedding_batch_size: int
+    llm_models: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class NvidiaSettings:
+    api_key: str
+    base_url: str
+    model: str
+    provider_timeout_seconds: float
+    embedding_model: str = "nvidia/nv-embedqa-e5-v5"
+    embedding_batch_size: int = 32
+    models: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -90,7 +124,10 @@ class Settings:
     storage: StorageSettings
     ollama: OllamaSettings
     openrouter: OpenRouterSettings
+    openai_llm: OpenAILlmSettings
+    gemini: GeminiSettings
     huggingface: HuggingFaceSettings
+    nvidia: NvidiaSettings
     openai_embeddings: OpenAIEmbeddingsSettings
 
     # These fields are intentionally on the root Settings
@@ -137,6 +174,27 @@ class Settings:
     retrieval_max_context_tokens: int = 2000
     retrieval_max_chunk_chars: int = 600
     retrieval_min_score: float = 0.0
+
+def _configured_models(
+    environment_name: str,
+    defaults: tuple[str, ...],
+    *,
+    primary_model: str = "",
+) -> tuple[str, ...]:
+    configured = os.getenv(environment_name)
+    models = (
+        defaults
+        if configured is None
+        else tuple(configured.split(","))
+    )
+    return tuple(
+        dict.fromkeys(
+            model.strip()
+            for model in (*models, primary_model)
+            if model.strip()
+        )
+    )
+
 
 def load_settings() -> Settings:
     parser_provider = os.getenv(
@@ -195,6 +253,39 @@ def load_settings() -> Settings:
             str(provider_timeout_seconds),
         )
     )
+    nvidia_timeout_seconds = float(
+        os.getenv(
+            "NVIDIA_API_TIMEOUT_SECONDS",
+            str(provider_timeout_seconds),
+        )
+    )
+    openai_llm_timeout_seconds = float(
+        os.getenv(
+            "OPENAI_LLM_TIMEOUT_SECONDS",
+            str(provider_timeout_seconds),
+        )
+    )
+    gemini_timeout_seconds = float(
+        os.getenv(
+            "GEMINI_TIMEOUT_SECONDS",
+            str(provider_timeout_seconds),
+        )
+    )
+    ollama_llm_model = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b").strip()
+    openrouter_model = os.getenv(
+        "OPENROUTER_MODEL",
+        "google/gemma-4-26b-a4b-it:free",
+    ).strip()
+    huggingface_llm_model = os.getenv(
+        "HF_LLM_MODEL",
+        "Qwen/Qwen2.5-7B-Instruct-1M",
+    ).strip()
+    nvidia_model = os.getenv(
+        "NVIDIA_MODEL",
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+    ).strip()
+    openai_llm_model = os.getenv("OPENAI_LLM_MODEL", "gpt-4.1-mini").strip()
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
     return Settings(
         app=AppSettings(
@@ -289,11 +380,13 @@ def load_settings() -> Settings:
                 "EMBEDDING_MODEL_NAME",
                 "mxbai-embed-large",
             ),
-            llm_model_name=os.getenv(
-                "LLM_MODEL_NAME",
-                "qwen2.5:7b",
-            ),
+            llm_model_name=ollama_llm_model,
             provider_timeout_seconds=ollama_timeout_seconds,
+            llm_models=_configured_models(
+                "OLLAMA_LLM_MODELS",
+                ("qwen2.5:3b", "qwen2.5:7b"),
+                primary_model=ollama_llm_model,
+            ),
         ),
         openrouter=OpenRouterSettings(
             base_url=os.getenv(
@@ -304,10 +397,7 @@ def load_settings() -> Settings:
                 "OPENROUTER_API_KEY",
                 "",
             ),
-            model=os.getenv(
-                "OPENROUTER_MODEL",
-                "google/gemma-4-26b-a4b-it:free",
-            ),
+            model=openrouter_model,
             temperature=float(
                 os.getenv(
                     "OPENROUTER_TEMPERATURE",
@@ -329,13 +419,43 @@ def load_settings() -> Settings:
                 64,
                 max(1, int(os.getenv("OPENROUTER_EMBEDDING_BATCH_SIZE", "64"))),
             ),
-            fallback_models=tuple(
-                item.strip()
-                for item in os.getenv(
-                    "OPENROUTER_FALLBACK_MODELS",
-                    "",
-                ).split(",")
-                if item.strip()
+            models=_configured_models(
+                "OPENROUTER_MODELS",
+                (
+                    "google/gemma-4-26b-a4b-it:free",
+                    "qwen/qwen-2.5-7b-instruct",
+                ),
+                primary_model=openrouter_model,
+            ),
+        ),
+        openai_llm=OpenAILlmSettings(
+            base_url=os.getenv(
+                "OPENAI_BASE_URL",
+                "https://api.openai.com/v1",
+            ).rstrip("/"),
+            api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            model=openai_llm_model,
+            temperature=float(os.getenv("OPENAI_LLM_TEMPERATURE", "0.2")),
+            provider_timeout_seconds=openai_llm_timeout_seconds,
+            models=_configured_models(
+                "OPENAI_LLM_MODELS",
+                ("gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"),
+                primary_model=openai_llm_model,
+            ),
+        ),
+        gemini=GeminiSettings(
+            base_url=os.getenv(
+                "GEMINI_BASE_URL",
+                "https://generativelanguage.googleapis.com/v1beta",
+            ).rstrip("/"),
+            api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            model=gemini_model,
+            temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.2")),
+            provider_timeout_seconds=gemini_timeout_seconds,
+            models=_configured_models(
+                "GEMINI_MODELS",
+                ("gemini-2.5-flash", "gemini-2.5-pro"),
+                primary_model=gemini_model,
             ),
         ),
         huggingface=HuggingFaceSettings(
@@ -344,6 +464,7 @@ def load_settings() -> Settings:
                 "HF_EMBEDDING_MODEL",
                 "BAAI/bge-large-en-v1.5",
             ),
+            llm_model=huggingface_llm_model,
             inference_provider=os.getenv(
                 "HF_INFERENCE_PROVIDER",
                 "hf-inference",
@@ -357,6 +478,35 @@ def load_settings() -> Settings:
             embedding_batch_size=min(
                 64,
                 max(1, int(os.getenv("HF_EMBEDDING_BATCH_SIZE", "32"))),
+            ),
+            llm_models=_configured_models(
+                "HF_LLM_MODELS",
+                (
+                    "Qwen/Qwen2.5-7B-Instruct-1M",
+                    "google/gemma-2-2b-it",
+                ),
+                primary_model=huggingface_llm_model,
+            ),
+        ),
+        nvidia=NvidiaSettings(
+            api_key=os.getenv("NVIDIA_API_KEY", "").strip(),
+            base_url=os.getenv(
+                "NVIDIA_BASE_URL",
+                "https://integrate.api.nvidia.com/v1",
+            ).rstrip("/"),
+            model=nvidia_model,
+            provider_timeout_seconds=nvidia_timeout_seconds,
+            embedding_batch_size=min(
+                64,
+                max(1, int(os.getenv("NVIDIA_EMBEDDING_BATCH_SIZE", "32"))),
+            ),
+            models=_configured_models(
+                "NVIDIA_MODELS",
+                (
+                    "nvidia/nemotron-3.5-lightning-30b-a3b",
+                    "nvidia/nemotron-3.5-super-120b-a12b",
+                ),
+                primary_model=nvidia_model,
             ),
         ),
         openai_embeddings=OpenAIEmbeddingsSettings(

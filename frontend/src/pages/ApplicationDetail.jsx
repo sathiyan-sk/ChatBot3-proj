@@ -55,6 +55,12 @@ const DOC_STATUS = {
 const providerChoices = (options = []) =>
   [...new Set(options.map((option) => option.provider))];
 
+const providerLabel = (provider) =>
+  ({
+    gemini: "Google Gemini",
+    openai: "OpenAI",
+  })[provider] || provider;
+
 // Preview theme tokens mirroring the real widget.css CSS variables so the
 // Live Preview reflects the ACTUAL light/dark appearance (panel background,
 // bubbles, input, footer and launcher), not just the header colour.
@@ -115,6 +121,9 @@ export default function ApplicationDetail() {
   );
   const selectedLlmModels = llmOptions.filter(
     (option) => option.provider === settings?.llm_provider
+  );
+  const isCurrentLlmSelectionAvailable = selectedLlmModels.some(
+    (option) => option.model === settings?.llm_model
   );
 
   // Interaction sandbox testing states
@@ -1719,6 +1728,9 @@ export default function ApplicationDetail() {
                     <p className="mt-1 text-[11px] text-slate-400">
                       Choices are limited to providers and models enabled by the platform.
                     </p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Hugging Face and NVIDIA inference require platform credentials. Model availability, free limits, and rates depend on each provider account.
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1768,7 +1780,7 @@ export default function ApplicationDetail() {
                           )}
                         {embeddingProviders.map((provider) => (
                           <option key={provider} value={provider}>
-                            {provider}
+                            {providerLabel(provider)}
                           </option>
                         ))}
                       </Select>
@@ -1806,7 +1818,12 @@ export default function ApplicationDetail() {
                     <Field label="LLM Provider" htmlFor="settings-llm-provider">
                       <Select
                         id="settings-llm-provider"
-                        value={settings?.llm_provider || ""}
+                        value={
+                          llmProviders.includes(settings?.llm_provider)
+                            ? settings.llm_provider
+                            : ""
+                        }
+                        disabled={!llmProviders.length}
                         onChange={(e) => {
                           const nextModel = llmOptions.find(
                             (option) => option.provider === e.target.value
@@ -1819,15 +1836,12 @@ export default function ApplicationDetail() {
                         }}
                         data-testid="settings-llm-provider"
                       >
-                        {!llmProviders.includes(settings?.llm_provider) &&
-                          settings?.llm_provider && (
-                            <option value={settings.llm_provider}>
-                              {settings.llm_provider} (legacy selection)
-                            </option>
-                          )}
+                        <option value="" disabled>
+                          Choose an enabled provider
+                        </option>
                         {llmProviders.map((provider) => (
                           <option key={provider} value={provider}>
-                            {provider}
+                            {providerLabel(provider)}
                           </option>
                         ))}
                       </Select>
@@ -1836,20 +1850,20 @@ export default function ApplicationDetail() {
                     <Field label="Generation Model" htmlFor="settings-llm-model">
                       <Select
                         id="settings-llm-model"
-                        value={settings?.llm_model || ""}
+                        value={
+                          isCurrentLlmSelectionAvailable
+                            ? settings.llm_model
+                            : ""
+                        }
+                        disabled={!selectedLlmModels.length}
                         onChange={(e) =>
                           setSettings({ ...settings, llm_model: e.target.value })
                         }
                         data-testid="settings-llm-model"
                       >
-                        {!selectedLlmModels.some(
-                          (option) => option.model === settings?.llm_model
-                        ) &&
-                          settings?.llm_model && (
-                            <option value={settings.llm_model}>
-                              {settings.llm_model} (legacy selection)
-                            </option>
-                          )}
+                        <option value="" disabled>
+                          Choose an enabled model
+                        </option>
                         {selectedLlmModels.map((option) => (
                           <option
                             key={`${option.provider}:${option.model}`}
@@ -1861,6 +1875,18 @@ export default function ApplicationDetail() {
                       </Select>
                     </Field>
                   </div>
+
+                  {providerCatalog && !isCurrentLlmSelectionAvailable && (
+                    <p
+                      role="status"
+                      className="rounded-control border border-amber-500/25 bg-amber-500/[0.07] p-3 text-[11px] text-amber-200"
+                      data-testid="llm-model-unavailable-warning"
+                    >
+                      The saved LLM provider or model is not enabled in the
+                      backend catalog. Choose an available provider and model
+                      before saving these settings.
+                    </p>
+                  )}
 
                   {settings?.embedding_change_allowed === false && (
                     <p
@@ -1952,6 +1978,9 @@ export default function ApplicationDetail() {
                 <Button
                   type="submit"
                   className="uppercase tracking-wider"
+                  disabled={
+                    Boolean(providerCatalog) && !isCurrentLlmSelectionAvailable
+                  }
                   data-testid="settings-save-btn"
                 >
                   Save Parameter Core
