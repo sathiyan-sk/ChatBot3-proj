@@ -170,6 +170,30 @@ def test_openrouter_default_catalog_contains_valid_qwen_chat_model(monkeypatch):
     assert "qwen/qwen3-8b" not in openrouter_models
 
 
+def test_llm_catalog_does_not_add_unlisted_default_model(monkeypatch):
+    from app.config.provider_registry import build_provider_catalog
+    from app.config.settings import load_settings
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "qwen/qwen3-8b")
+    monkeypatch.setenv("OPENROUTER_MODELS", "google/gemma-4-26b-a4b-it:free")
+
+    catalog = build_provider_catalog(load_settings())
+
+    assert {
+        option.model for option in catalog.llms if option.provider == "openrouter"
+    } == {"google/gemma-4-26b-a4b-it:free"}
+
+    monkeypatch.delenv("OPENROUTER_MODELS")
+    catalog_without_explicit_allowlist = build_provider_catalog(load_settings())
+
+    assert "qwen/qwen3-8b" not in {
+        option.model
+        for option in catalog_without_explicit_allowlist.llms
+        if option.provider == "openrouter"
+    }
+
+
 def test_ollama_http_error_identifies_selected_model(monkeypatch):
     request = httpx.Request("POST", "http://localhost:11434/api/chat")
     response = httpx.Response(404, request=request)

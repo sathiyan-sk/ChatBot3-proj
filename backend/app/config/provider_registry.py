@@ -90,21 +90,12 @@ def build_provider_catalog(settings: Settings) -> ProviderCatalog:
         enabled_llm_providers.add("nvidia")
 
     configured_models_by_provider = {
-        "ollama": (
-            *settings.ollama.llm_models,
-            settings.ollama.llm_model_name,
-        ),
-        "openrouter": (
-            *settings.openrouter.models,
-            settings.openrouter.model,
-        ),
-        "openai": (*settings.openai_llm.models, settings.openai_llm.model),
-        "gemini": (*settings.gemini.models, settings.gemini.model),
-        "huggingface": (
-            *settings.huggingface.llm_models,
-            settings.huggingface.llm_model,
-        ),
-        "nvidia": (*settings.nvidia.models, settings.nvidia.model),
+        "ollama": settings.ollama.llm_models,
+        "openrouter": settings.openrouter.models,
+        "openai": settings.openai_llm.models,
+        "gemini": settings.gemini.models,
+        "huggingface": settings.huggingface.llm_models,
+        "nvidia": settings.nvidia.models,
     }
     llm_options = []
     seen_llm_options: set[tuple[str, str]] = set()

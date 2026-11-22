@@ -401,20 +401,15 @@ def test_llm_catalog_uses_backend_configured_models_for_every_provider(monkeypat
 
     catalog = build_provider_catalog(load_settings())
     expected_models = {
-        "ollama": {"ollama-one", "ollama-two", "ollama-default"},
-        "openrouter": {
-            "openrouter-one",
-            "openrouter-two",
-            "openrouter-default",
-        },
-        "openai": {"openai-one", "openai-two", "openai-default"},
-        "gemini": {"gemini-one", "gemini-two", "gemini-default"},
+        "ollama": {"ollama-one", "ollama-two"},
+        "openrouter": {"openrouter-one", "openrouter-two"},
+        "openai": {"openai-one", "openai-two"},
+        "gemini": {"gemini-one", "gemini-two"},
         "huggingface": {
             "huggingface-one",
             "huggingface-two",
-            "huggingface-default",
         },
-        "nvidia": {"nvidia-one", "nvidia-two", "nvidia-default"},
+        "nvidia": {"nvidia-one", "nvidia-two"},
     }
     for provider, models in expected_models.items():
         assert {

@@ -346,6 +346,29 @@ def _build_llm_provider(
     )
 
 
+def _build_application_embeddings_provider(
+    settings: Settings,
+    *,
+    provider_name: str,
+    model_name: str | None,
+):
+    if not is_supported_selection(
+        build_provider_catalog(settings),
+        capability="embedding",
+        provider=provider_name.strip().lower(),
+        model=model_name,
+    ):
+        raise ConfigurationError(
+            "The selected embedding provider/model is not enabled by the platform "
+            f"configuration: {provider_name!r}/{model_name!r}."
+        )
+    return build_embeddings_provider(
+        settings,
+        provider_name=provider_name,
+        model_name=model_name,
+    )
+
+
 def build_question_answering_pipeline(
     *,
     settings: Settings,
@@ -358,7 +381,7 @@ def build_question_answering_pipeline(
         application_settings,
         capability="embedding",
     )
-    embeddings_provider = build_embeddings_provider(
+    embeddings_provider = _build_application_embeddings_provider(
         settings,
         provider_name=embedding_provider_name,
         model_name=embedding_model_name,
@@ -506,7 +529,7 @@ def build_knowledge_ingestion_pipeline(
         application_settings,
         capability="embedding",
     )
-    embeddings_provider = build_embeddings_provider(
+    embeddings_provider = _build_application_embeddings_provider(
         settings,
         provider_name=embedding_provider_name,
         model_name=embedding_model_name,

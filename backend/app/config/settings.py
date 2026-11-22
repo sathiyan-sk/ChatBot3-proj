@@ -179,8 +179,6 @@ class Settings:
 def _configured_models(
     environment_name: str,
     defaults: tuple[str, ...],
-    *,
-    primary_model: str = "",
 ) -> tuple[str, ...]:
     configured = os.getenv(environment_name)
     models = (
@@ -191,7 +189,7 @@ def _configured_models(
     return tuple(
         dict.fromkeys(
             model.strip()
-            for model in (*models, primary_model)
+            for model in models
             if model.strip()
         )
     )
@@ -386,7 +384,6 @@ def load_settings() -> Settings:
             llm_models=_configured_models(
                 "OLLAMA_LLM_MODELS",
                 ("qwen2.5:3b", "qwen2.5:7b"),
-                primary_model=ollama_llm_model,
             ),
         ),
         openrouter=OpenRouterSettings(
@@ -427,7 +424,6 @@ def load_settings() -> Settings:
                     "google/gemma-4-31b-it:free",
                     "qwen/qwen3-vl-8b-instruct",
                 ),
-                primary_model=openrouter_model,
             ),
         ),
         openai_llm=OpenAILlmSettings(
@@ -442,7 +438,6 @@ def load_settings() -> Settings:
             models=_configured_models(
                 "OPENAI_LLM_MODELS",
                 ("gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"),
-                primary_model=openai_llm_model,
             ),
         ),
         gemini=GeminiSettings(
@@ -457,7 +452,6 @@ def load_settings() -> Settings:
             models=_configured_models(
                 "GEMINI_MODELS",
                 ("gemini-2.5-flash", "gemini-2.5-pro"),
-                primary_model=gemini_model,
             ),
         ),
         huggingface=HuggingFaceSettings(
@@ -487,7 +481,6 @@ def load_settings() -> Settings:
                     "Qwen/Qwen2.5-7B-Instruct-1M",
                     "google/gemma-2-2b-it",
                 ),
-                primary_model=huggingface_llm_model,
             ),
             llm_inference_provider=os.getenv(
                 "HF_LLM_INFERENCE_PROVIDER",
@@ -512,7 +505,6 @@ def load_settings() -> Settings:
                     "nvidia/nemotron-3.5-lightning-30b-a3b",
                     "nvidia/nemotron-3.5-super-120b-a12b",
                 ),
-                primary_model=nvidia_model,
             ),
         ),
         openai_embeddings=OpenAIEmbeddingsSettings(

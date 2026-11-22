@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from app.config.settings import load_settings
+from app.api.dependencies import _build_application_embeddings_provider
 from app.config.provider_registry import build_provider_catalog
 from app.core.exceptions import ApplicationError, ConfigurationError
 from app.infrastructure.providers.embeddings.factory import build_embeddings_provider
@@ -166,3 +167,15 @@ def test_nvidia_embeddings_catalog_requires_key_and_1024_dimension(monkeypatch):
         option.provider == "nvidia"
         for option in build_provider_catalog(incompatible_dimension_settings).embeddings
     )
+
+
+def test_application_embedding_runtime_rejects_model_outside_catalog(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-key")
+    settings = load_settings()
+
+    with pytest.raises(ConfigurationError, match="not enabled by the platform"):
+        _build_application_embeddings_provider(
+            settings,
+            provider_name="nvidia",
+            model_name="nvidia/unlisted-embedding-model",
+        )
