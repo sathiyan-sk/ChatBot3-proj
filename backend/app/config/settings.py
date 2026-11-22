@@ -425,6 +425,7 @@ def load_settings() -> Settings:
                 (
                     "google/gemma-4-26b-a4b-it:free",
                     "google/gemma-4-31b-it:free",
+                    "qwen/qwen3-vl-8b-instruct",
                 ),
                 primary_model=openrouter_model,
             ),

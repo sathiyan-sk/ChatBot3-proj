@@ -310,6 +310,15 @@ credentials are configured. After changing a model list or credential,
 restart/redeploy the backend and reload the admin page to fetch the updated
 catalog.
 
+OpenRouter model IDs must exactly match its chat-model catalog. For example,
+`qwen/qwen3-8b` is not a current public OpenRouter model ID; the available
+Qwen3 8B chat-capable entry is `qwen/qwen3-vl-8b-instruct`. If replacing a
+model, update both `OPENROUTER_MODEL` (the platform default) and
+`OPENROUTER_MODELS` (the selectable allowlist) when applicable, then choose
+and save the new model in every application whose selection is stored in the
+database. The application-specific saved model does not change just because
+the environment default changes.
+
 OpenAI embeddings can also be selected with `EMBEDDING_PROVIDER=openai`,
 `OPENAI_API_KEY`, and `OPENAI_EMBEDDING_MODEL` (default
 `text-embedding-3-small`). Its default output dimension is 1024, matching the

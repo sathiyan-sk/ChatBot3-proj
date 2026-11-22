@@ -96,10 +96,26 @@ class OpenRouterLlmProvider(LlmProvider):
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             retryable = status_code == 429 or status_code >= 500
+            upstream_message = None
+            try:
+                error_payload = exc.response.json()
+            except ValueError:
+                error_payload = None
+            if isinstance(error_payload, dict):
+                provider_error = error_payload.get("error")
+                if isinstance(provider_error, dict):
+                    message = provider_error.get("message")
+                    if isinstance(message, str) and message.strip():
+                        upstream_message = message.strip()[:300]
             raise ApplicationError(
                 message=(
                     "OpenRouter chat request failed "
                     f"with HTTP {status_code} for selected model {model!r}."
+                    + (
+                        f" OpenRouter reported: {upstream_message}"
+                        if upstream_message
+                        else ""
+                    )
                 ),
                 code="openrouter_provider_failed",
                 status_code=503 if retryable else 502,
@@ -107,6 +123,11 @@ class OpenRouterLlmProvider(LlmProvider):
                     "upstream_status": status_code,
                     "model": model,
                     "retryable": retryable,
+                    **(
+                        {"upstream_message": upstream_message}
+                        if upstream_message
+                        else {}
+                    ),
                 },
             ) from exc
         except httpx.TimeoutException as exc:
