@@ -100,13 +100,15 @@ class GeminiLlmProvider(LlmProvider):
             raise ApplicationError(
                 message=(
                     "Gemini chat request failed "
-                    f"with HTTP {status_code}. Check the API key, model "
+                    f"with HTTP {status_code} for selected model {model!r}. "
+                    "Check the API key, model "
                     "availability, and account billing."
                 ),
                 code="gemini_llm_request_failed",
                 status_code=503 if retryable else 502,
                 details={
                     "upstream_status": status_code,
+                    "model": model,
                     "retryable": retryable,
                 },
             ) from exc

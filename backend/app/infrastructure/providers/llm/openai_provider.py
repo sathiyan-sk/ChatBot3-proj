@@ -93,13 +93,15 @@ class OpenAILlmProvider(LlmProvider):
             raise ApplicationError(
                 message=(
                     "OpenAI chat request failed "
-                    f"with HTTP {status_code}. Check the API key, model "
+                    f"with HTTP {status_code} for selected model {model!r}. "
+                    "Check the API key, model "
                     "availability, and account billing."
                 ),
                 code="openai_llm_request_failed",
                 status_code=503 if retryable else 502,
                 details={
                     "upstream_status": status_code,
+                    "model": model,
                     "retryable": retryable,
                 },
             ) from exc

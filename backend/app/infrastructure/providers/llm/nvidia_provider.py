@@ -85,13 +85,15 @@ class NvidiaLlmProvider(LlmProvider):
             raise ApplicationError(
                 message=(
                     "NVIDIA chat request failed "
-                    f"with HTTP {status_code}. Check the API key, model "
+                    f"with HTTP {status_code} for selected model {model!r}. "
+                    "Check the API key, model "
                     "availability, and NVIDIA API account limits."
                 ),
                 code="nvidia_llm_request_failed",
                 status_code=503 if status_code == 429 or status_code >= 500 else 502,
                 details={
                     "upstream_status": status_code,
+                    "model": model,
                     "retryable": status_code == 429 or status_code >= 500,
                 },
             ) from exc

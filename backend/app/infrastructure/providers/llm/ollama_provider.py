@@ -64,11 +64,35 @@ class OllamaLlmProvider(LlmProvider):
                 timeout=timeout,
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            retryable = status_code == 429 or status_code >= 500
             raise ApplicationError(
-                message="Ollama LLM provider request failed.",
+                message=(
+                    "Ollama chat request failed "
+                    f"with HTTP {status_code} for selected model {model!r}."
+                ),
                 code="llm_provider_failed",
-                status_code=502,
+                status_code=503 if retryable else 502,
+                details={
+                    "upstream_status": status_code,
+                    "model": model,
+                    "retryable": retryable,
+                },
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise ApplicationError(
+                message=f"Ollama chat request timed out for model {model!r}.",
+                code="llm_provider_failed",
+                status_code=503,
+                details={"model": model, "retryable": True},
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ApplicationError(
+                message=f"Could not connect to Ollama for model {model!r}.",
+                code="llm_provider_failed",
+                status_code=503,
+                details={"model": model, "retryable": True},
             ) from exc
 
         response_payload = response.json()

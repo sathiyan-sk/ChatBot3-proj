@@ -108,6 +108,40 @@ def test_openrouter_does_not_fall_back_when_selected_model_is_unavailable(
     assert attempted_models == ["selected/model"]
 
 
+def test_ollama_http_error_identifies_selected_model(monkeypatch):
+    request = httpx.Request("POST", "http://localhost:11434/api/chat")
+    response = httpx.Response(404, request=request)
+
+    def fail_request(*_args, **_kwargs):
+        raise httpx.HTTPStatusError(
+            "model not installed",
+            request=request,
+            response=response,
+        )
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.llm.ollama_provider.httpx.post",
+        fail_request,
+    )
+    provider = OllamaLlmProvider(
+        settings=SimpleNamespace(
+            base_url="http://localhost:11434",
+            llm_model_name="missing:latest",
+            provider_timeout_seconds=10,
+        )
+    )
+
+    with pytest.raises(ApplicationError) as error:
+        provider.generate(system_prompt="", user_prompt="question")
+
+    assert "missing:latest" in error.value.message
+    assert error.value.details == {
+        "upstream_status": 404,
+        "model": "missing:latest",
+        "retryable": False,
+    }
+
+
 def test_ollama_provider_maps_eval_counts_and_duration(monkeypatch):
     monkeypatch.setattr(
         "app.infrastructure.providers.llm.ollama_provider.httpx.post",

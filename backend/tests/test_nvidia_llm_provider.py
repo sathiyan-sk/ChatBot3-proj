@@ -113,7 +113,11 @@ def test_nvidia_llm_rate_limit_is_retryable(monkeypatch):
         )
 
     assert error.value.code == "nvidia_llm_request_failed"
-    assert error.value.details == {"upstream_status": 429, "retryable": True}
+    assert error.value.details == {
+        "upstream_status": 429,
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "retryable": True,
+    }
 
 
 def test_nvidia_application_model_is_used_by_runtime_provider(monkeypatch):

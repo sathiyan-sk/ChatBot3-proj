@@ -107,7 +107,11 @@ def test_openai_llm_rate_limit_is_retryable(monkeypatch):
         )
 
     assert error.value.code == "openai_llm_request_failed"
-    assert error.value.details == {"upstream_status": 429, "retryable": True}
+    assert error.value.details == {
+        "upstream_status": 429,
+        "model": "gpt-4.1-mini",
+        "retryable": True,
+    }
 
 
 def test_openai_application_model_is_used_by_runtime_provider(monkeypatch):

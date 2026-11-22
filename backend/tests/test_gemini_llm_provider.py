@@ -120,7 +120,11 @@ def test_gemini_llm_rate_limit_is_retryable(monkeypatch):
         )
 
     assert error.value.code == "gemini_llm_request_failed"
-    assert error.value.details == {"upstream_status": 429, "retryable": True}
+    assert error.value.details == {
+        "upstream_status": 429,
+        "model": "gemini-2.5-flash",
+        "retryable": True,
+    }
 
 
 def test_gemini_application_model_is_used_by_runtime_provider(monkeypatch):
