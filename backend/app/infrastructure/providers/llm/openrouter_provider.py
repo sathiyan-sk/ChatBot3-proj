@@ -97,6 +97,8 @@ class OpenRouterLlmProvider(LlmProvider):
             status_code = exc.response.status_code
             retryable = status_code == 429 or status_code >= 500
             upstream_message = None
+            upstream_provider = None
+            upstream_detail = None
             try:
                 error_payload = exc.response.json()
             except ValueError:
@@ -107,16 +109,38 @@ class OpenRouterLlmProvider(LlmProvider):
                     message = provider_error.get("message")
                     if isinstance(message, str) and message.strip():
                         upstream_message = message.strip()[:300]
-            raise ApplicationError(
-                message=(
+                    metadata = provider_error.get("metadata")
+                    if isinstance(metadata, dict):
+                        provider_name = metadata.get("provider_name")
+                        if isinstance(provider_name, str) and provider_name.strip():
+                            upstream_provider = provider_name.strip()[:100]
+                        raw_detail = metadata.get("raw")
+                        if isinstance(raw_detail, str) and raw_detail.strip():
+                            upstream_detail = raw_detail.strip()[:300]
+            retry_after = exc.response.headers.get("Retry-After")
+            if retry_after:
+                retry_after = retry_after.strip()[:100]
+            if status_code == 429:
+                failure_message = (
+                    "OpenRouter rate-limited the request "
+                    f"for selected model {model!r} (HTTP 429). "
+                    "Check provider/account limits or retry later."
+                )
+            else:
+                failure_message = (
                     "OpenRouter chat request failed "
                     f"with HTTP {status_code} for selected model {model!r}."
-                    + (
-                        f" OpenRouter reported: {upstream_message}"
-                        if upstream_message
-                        else ""
-                    )
-                ),
+                )
+            if upstream_provider:
+                failure_message += f" Upstream provider: {upstream_provider}."
+            if upstream_message and upstream_message.lower() != "provider returned error":
+                failure_message += f" OpenRouter reported: {upstream_message}"
+            if upstream_detail:
+                failure_message += f" Upstream detail: {upstream_detail}"
+            elif upstream_message and upstream_message.lower() == "provider returned error":
+                failure_message += f" OpenRouter reported: {upstream_message}"
+            raise ApplicationError(
+                message=failure_message,
                 code="openrouter_provider_failed",
                 status_code=503 if retryable else 502,
                 details={
@@ -124,10 +148,21 @@ class OpenRouterLlmProvider(LlmProvider):
                     "model": model,
                     "retryable": retryable,
                     **(
+                        {"upstream_provider": upstream_provider}
+                        if upstream_provider
+                        else {}
+                    ),
+                    **(
                         {"upstream_message": upstream_message}
                         if upstream_message
                         else {}
                     ),
+                    **(
+                        {"upstream_detail": upstream_detail}
+                        if upstream_detail
+                        else {}
+                    ),
+                    **({"retry_after": retry_after} if retry_after else {}),
                 },
             ) from exc
         except httpx.TimeoutException as exc:

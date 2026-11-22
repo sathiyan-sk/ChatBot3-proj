@@ -154,6 +154,66 @@ def test_openrouter_surfaces_provider_model_not_found_reason(monkeypatch):
     )
 
 
+def test_openrouter_429_surfaces_provider_rate_limit_details(monkeypatch):
+    request = httpx.Request(
+        "POST",
+        "https://openrouter.ai/api/v1/chat/completions",
+    )
+    response = httpx.Response(
+        429,
+        request=request,
+        headers={"Retry-After": "30"},
+        json={
+            "error": {
+                "message": "Provider returned error",
+                "code": 429,
+                "metadata": {
+                    "provider_name": "Google",
+                    "raw": "Rate limit exceeded",
+                },
+            }
+        },
+    )
+
+    def fail_request(*_args, **_kwargs):
+        raise httpx.HTTPStatusError(
+            "provider rate limited",
+            request=request,
+            response=response,
+        )
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.llm.openrouter_provider.httpx.post",
+        fail_request,
+    )
+    provider = OpenRouterLlmProvider(
+        settings=SimpleNamespace(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
+            model="google/gemma-4-26b-a4b-it:free",
+            temperature=0.2,
+            provider_timeout_seconds=10,
+        )
+    )
+
+    with pytest.raises(ApplicationError) as error:
+        provider.generate(system_prompt="", user_prompt="question")
+
+    assert error.value.status_code == 503
+    assert error.value.details == {
+        "upstream_status": 429,
+        "model": "google/gemma-4-26b-a4b-it:free",
+        "retryable": True,
+        "upstream_provider": "Google",
+        "upstream_message": "Provider returned error",
+        "upstream_detail": "Rate limit exceeded",
+        "retry_after": "30",
+    }
+    assert "rate-limited" in error.value.message
+    assert "Upstream provider: Google" in error.value.message
+    assert "Rate limit exceeded" in error.value.message
+
+
 def test_openrouter_default_catalog_contains_valid_qwen_chat_model(monkeypatch):
     from app.config.provider_registry import build_provider_catalog
     from app.config.settings import load_settings
