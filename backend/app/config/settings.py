@@ -83,6 +83,7 @@ class HuggingFaceSettings:
     provider_timeout_seconds: float
     embedding_batch_size: int
     llm_models: tuple[str, ...] = ()
+    llm_inference_provider: str = "featherless-ai"
 
 
 @dataclass(slots=True, frozen=True)
@@ -423,7 +424,7 @@ def load_settings() -> Settings:
                 "OPENROUTER_MODELS",
                 (
                     "google/gemma-4-26b-a4b-it:free",
-                    "qwen/qwen-2.5-7b-instruct",
+                    "google/gemma-4-31b-it:free",
                 ),
                 primary_model=openrouter_model,
             ),
@@ -487,6 +488,10 @@ def load_settings() -> Settings:
                 ),
                 primary_model=huggingface_llm_model,
             ),
+            llm_inference_provider=os.getenv(
+                "HF_LLM_INFERENCE_PROVIDER",
+                "featherless-ai",
+            ).strip(),
         ),
         nvidia=NvidiaSettings(
             api_key=os.getenv("NVIDIA_API_KEY", "").strip(),

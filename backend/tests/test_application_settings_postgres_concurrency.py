@@ -81,7 +81,7 @@ def _platform_settings(
             1024,
             models=(
                 "google/gemma-4-26b-a4b-it:free",
-                "qwen/qwen-2.5-7b-instruct",
+                "google/gemma-4-31b-it:free",
             ),
         ),
         openai_llm=OpenAILlmSettings(
@@ -108,6 +108,7 @@ def _platform_settings(
             1,
             1,
             ("Qwen/Qwen2.5-7B-Instruct-1M", "google/gemma-2-2b-it"),
+            "featherless-ai",
         ),
         nvidia=NvidiaSettings(
             "",
@@ -390,6 +391,7 @@ def test_llm_catalog_uses_backend_configured_models_for_every_provider(monkeypat
         "HF_TOKEN": "configured",
         "HF_LLM_MODEL": "huggingface-default",
         "HF_LLM_MODELS": "huggingface-one,huggingface-two",
+        "HF_LLM_INFERENCE_PROVIDER": "featherless-ai",
         "NVIDIA_API_KEY": "configured",
         "NVIDIA_MODEL": "nvidia-default",
         "NVIDIA_MODELS": "nvidia-one,nvidia-two",

@@ -255,6 +255,11 @@ select `huggingface` in an application's LLM provider settings, then choose a
 model from the backend catalog. `HF_LLM_MODELS` controls the comma-separated
 model allowlist and `HF_LLM_MODEL` selects the platform default. The example
 list includes `Qwen/Qwen2.5-7B-Instruct-1M` and `google/gemma-2-2b-it`.
+`HF_LLM_INFERENCE_PROVIDER` pins requests to a specific hosted provider
+(default `featherless-ai`); each listed model must be available from that
+provider. The chat adapter appends the provider suffix required by the
+Hugging Face router unless the model ID already includes one. This avoids
+automatic provider routing and makes model/provider mismatches explicit.
 Hugging Face model access depends on provider availability and token
 permissions. Inference Providers are usage-based, so included credits and
 rates vary by account and model; do not assume every request is free.

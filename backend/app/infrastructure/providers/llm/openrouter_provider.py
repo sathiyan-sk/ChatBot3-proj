@@ -99,12 +99,13 @@ class OpenRouterLlmProvider(LlmProvider):
             raise ApplicationError(
                 message=(
                     "OpenRouter chat request failed "
-                    f"with HTTP {status_code} for the selected model."
+                    f"with HTTP {status_code} for selected model {model!r}."
                 ),
                 code="openrouter_provider_failed",
                 status_code=503 if retryable else 502,
                 details={
                     "upstream_status": status_code,
+                    "model": model,
                     "retryable": retryable,
                 },
             ) from exc

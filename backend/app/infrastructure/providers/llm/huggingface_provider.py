@@ -46,6 +46,26 @@ class HuggingFaceLlmProvider(LlmProvider):
                 status_code=503,
             )
 
+        inference_provider = getattr(
+            self.settings,
+            "llm_inference_provider",
+            "featherless-ai",
+        ).strip()
+        if not inference_provider:
+            raise ApplicationError(
+                message=(
+                    "HF_LLM_INFERENCE_PROVIDER must name an explicit "
+                    "Hugging Face Inference Provider."
+                ),
+                code="huggingface_llm_provider_missing",
+                status_code=503,
+            )
+        routed_model = (
+            model
+            if ":" in model
+            else f"{model}:{inference_provider}"
+        )
+
         messages: list[dict[str, str]] = []
         if normalized_system:
             messages.append({"role": "system", "content": normalized_system})
@@ -59,7 +79,7 @@ class HuggingFaceLlmProvider(LlmProvider):
             response = httpx.post(
                 "https://router.huggingface.co/v1/chat/completions",
                 json={
-                    "model": model,
+                    "model": routed_model,
                     "messages": messages,
                     "temperature": (
                         temperature
@@ -80,13 +100,16 @@ class HuggingFaceLlmProvider(LlmProvider):
             raise ApplicationError(
                 message=(
                     "Hugging Face chat request failed "
-                    f"with HTTP {status_code}. Check token permissions, "
+                    f"with HTTP {status_code} for model {model!r} using "
+                    f"provider {inference_provider!r}. Check token permissions, "
                     "model/provider availability, and account credits or billing."
                 ),
                 code="huggingface_llm_request_failed",
                 status_code=503 if status_code == 429 or status_code >= 500 else 502,
                 details={
                     "upstream_status": status_code,
+                    "model": model,
+                    "inference_provider": inference_provider,
                     "retryable": status_code == 429 or status_code >= 500,
                 },
             ) from exc

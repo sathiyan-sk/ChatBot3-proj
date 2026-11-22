@@ -100,7 +100,11 @@ def test_openrouter_does_not_fall_back_when_selected_model_is_unavailable(
         provider.generate(system_prompt="", user_prompt="question")
 
     assert error.value.code == "openrouter_provider_failed"
-    assert error.value.details == {"upstream_status": 404, "retryable": False}
+    assert error.value.details == {
+        "upstream_status": 404,
+        "model": "selected/model",
+        "retryable": False,
+    }
     assert attempted_models == ["selected/model"]
 
 
