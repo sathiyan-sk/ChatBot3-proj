@@ -14,6 +14,7 @@ from app.api.dependencies import (
     get_chat_application_service,
 )
 from app.api.schemas.chat import (
+    ChatActionResponse,
     ChatMessageRequest,
     ChatMessageResponse,
     CitationResponse,
@@ -94,6 +95,15 @@ def create_chat_message(
     ),
     answer=result.answer_text,
     citations=citations,
+    actions=[
+        ChatActionResponse(
+            type=action.type,
+            label=action.label,
+            consent_text=action.consent_text,
+            consent_text_version=action.consent_text_version,
+        )
+        for action in result.actions
+    ],
     created_at=datetime.now(timezone.utc),
 )
 
@@ -145,5 +155,14 @@ def create_widget_chat_message(
         ),
         answer=result.answer_text,
         citations=citations,
+        actions=[
+            ChatActionResponse(
+                type=action.type,
+                label=action.label,
+                consent_text=action.consent_text,
+                consent_text_version=action.consent_text_version,
+            )
+            for action in result.actions
+        ],
         created_at=datetime.now(timezone.utc),
     )

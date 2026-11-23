@@ -5,10 +5,11 @@ import {
   ArrowLeft, Database, MessageSquare, Settings, Play,
   Trash2, Copy, Check, UploadCloud, FileText,
   Sparkles, Sliders, Globe, Eye, Terminal, RefreshCw,
-  Plus, RotateCcw, XCircle, KeyRound, Pencil, Power,
+  Plus, RotateCcw, XCircle, KeyRound, Pencil, Power, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConversationsTab from "@/components/ConversationsTab";
+import LeadsTab from "@/components/LeadsTab";
 
 import { Button, Badge, Card, Spinner, ErrorBanner } from "@/components/ui/Primitives";
 import { PageShell, PageHeader, SectionHeader } from "@/components/ui/Layout";
@@ -29,8 +30,8 @@ const DEFAULT_STARTER_PROMPTS = [
 
 /* ============================================================
    APPLICATION DETAIL
-   Six-tab workspace: General, Knowledge Base, Widget Config,
-   Chat Sandbox, Conversations, Settings. Rebuilt on the shared
+   Seven-tab workspace: General, Knowledge Base, Widget Config,
+   Chat Sandbox, Conversations, Leads, Settings. Rebuilt on the shared
    UI kit (cards, tabs, form controls, confirm dialog) while
    keeping every backend interaction and data-testid intact.
    ============================================================ */
@@ -41,6 +42,7 @@ const TAB_ITEMS = [
   { key: "widget", label: "Widget Config", icon: Globe, testId: "tab-widget" },
   { key: "chat", label: "Chat Testing", icon: MessageSquare, testId: "tab-chat" },
   { key: "conversations", label: "Conversations", icon: MessageSquare, testId: "tab-conversations" },
+  { key: "leads", label: "Leads", icon: Users, testId: "tab-leads" },
   { key: "settings", label: "Settings", icon: Settings, testId: "tab-settings" },
 ];
 
@@ -1696,6 +1698,7 @@ export default function ApplicationDetail() {
 
         {/* ======================= TAB: CONVERSATIONS ======================= */}
         {activeTab === "conversations" && <ConversationsTab applicationId={id} />}
+        {activeTab === "leads" && <LeadsTab applicationId={id} />}
 
         {/* ======================= TAB: SETTINGS ======================= */}
         {activeTab === "settings" && (

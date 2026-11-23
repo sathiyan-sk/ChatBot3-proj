@@ -53,8 +53,10 @@ class CreateWidgetRequest(BaseModel):
         normalized = value.strip().upper()
         if len(normalized) == 4 and normalized.startswith("#"):
             normalized = "#" + "".join(character * 2 for character in normalized[1:])
-        if len(normalized) != 7 or normalized[0] != "#" or any(
-            character not in "0123456789ABCDEF" for character in normalized[1:]
+        if (
+            len(normalized) != 7
+            or normalized[0] != "#"
+            or any(character not in "0123456789ABCDEF" for character in normalized[1:])
         ):
             raise ValueError("Accent color must be a valid #RRGGBB hex value.")
         return normalized
@@ -68,7 +70,9 @@ class CreateWidgetRequest(BaseModel):
         if values is None:
             return None
         if len(values) > 20 or any(len(prompt.strip()) > 200 for prompt in values):
-            raise ValueError("Provide at most 20 starter prompts, each 200 characters or fewer.")
+            raise ValueError(
+                "Provide at most 20 starter prompts, each 200 characters or fewer."
+            )
         return values
 
 
@@ -143,7 +147,6 @@ class WidgetResponse(BaseModel):
     }
 
 
-
 class PublicWidgetConfigurationResponse(BaseModel):
     display_name: str
     theme: str
@@ -152,6 +155,8 @@ class PublicWidgetConfigurationResponse(BaseModel):
     placeholder_text: str | None
     accent_color: str | None = None
     starter_prompts: list[str] = Field(default_factory=list)
+    lead_consent_text: str
+    lead_consent_text_version: str
     is_enabled: bool
 
 

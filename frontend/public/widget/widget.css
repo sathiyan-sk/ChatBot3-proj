@@ -206,6 +206,26 @@
   outline-offset: 2px;
   opacity: 1;
 }
+.oceanrag-contact-btn {
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--oceanrag-header-text);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.oceanrag-contact-btn:hover,
+.oceanrag-contact-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+}
+.oceanrag-contact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ---------- Messages ---------- */
 .oceanrag-messages {
@@ -267,6 +287,88 @@
   margin-top: 4px;
   padding: 0 4px;
   user-select: none;
+}
+.oceanrag-lead-card,
+.oceanrag-feedback-card {
+  align-self: flex-start;
+  width: min(100%, 320px);
+  padding: 14px;
+  border: 1px solid var(--oceanrag-panel-border);
+  border-radius: 14px;
+  background: var(--oceanrag-bot-bubble-bg);
+  color: var(--oceanrag-body-text);
+  font-size: 12px;
+}
+.oceanrag-lead-card h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.oceanrag-lead-card p,
+.oceanrag-feedback-card p {
+  margin: 0 0 10px;
+  color: var(--oceanrag-muted-text);
+  line-height: 1.45;
+}
+.oceanrag-lead-card > label {
+  display: block;
+  margin-top: 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.oceanrag-lead-card input:not([type="checkbox"]),
+.oceanrag-lead-card textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--oceanrag-input-border);
+  border-radius: 8px;
+  background: var(--oceanrag-input-bg);
+  color: var(--oceanrag-body-text);
+  font: inherit;
+}
+.oceanrag-lead-card textarea {
+  resize: vertical;
+}
+.oceanrag-lead-consent {
+  display: flex !important;
+  gap: 8px;
+  align-items: flex-start;
+  line-height: 1.45;
+}
+.oceanrag-lead-card > button {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--oceanrag-accent);
+  color: var(--oceanrag-accent-contrast);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.oceanrag-lead-card > button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.oceanrag-lead-error {
+  margin-top: 8px;
+  color: #dc2626;
+  font-size: 11px;
+}
+.oceanrag-feedback-stars {
+  display: flex;
+  gap: 8px;
+}
+.oceanrag-feedback-stars button {
+  border: 0;
+  background: transparent;
+  color: var(--oceanrag-accent);
+  font-size: 24px;
+  cursor: pointer;
 }
 
 /* Custom scrollbar (WebKit) */

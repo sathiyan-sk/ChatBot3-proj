@@ -45,6 +45,8 @@
   let headerTitle = "Chat Assistant";
   let accentColor = null;
   let starterPrompts = [];
+  let leadConsentText = "";
+  let leadConsentTextVersion = "";
   let conversationIdentity = null;
   let conversationId = null;
   let unreadCount = 0;
@@ -53,6 +55,7 @@
   let launcher = null;
   let chatbox = null;
   let closeBtn = null;
+  let contactBtn = null;
   let textInput = null;
   let form = null;
   let messagesBox = null;
@@ -210,6 +213,144 @@
     }
   }
 
+  function showContactForm(action) {
+    if (!messagesBox || !conversationId) return;
+    const existing = messagesBox.querySelector(".oceanrag-lead-card");
+    if (existing) {
+      existing.scrollIntoView({ block: "nearest" });
+      return;
+    }
+
+    const formElement = document.createElement("form");
+    formElement.className = "oceanrag-lead-card";
+    formElement.innerHTML = `
+      <h3>Send an enquiry</h3>
+      <p>Share your details and the business team can follow up with you.</p>
+      <label>Name <input name="name" maxlength="120" required autocomplete="name" /></label>
+      <label>Email <input name="email" type="email" maxlength="254" autocomplete="email" /></label>
+      <label>Phone <input name="phone" type="tel" maxlength="32" autocomplete="tel" /></label>
+      <label>What would you like to discuss? <textarea name="message" maxlength="2000" rows="3"></textarea></label>
+      <label class="oceanrag-lead-consent">
+        <input name="consent" type="checkbox" required />
+        <span class="oceanrag-lead-consent-text"></span>
+      </label>
+      <button type="submit">Review and submit enquiry</button>
+      <div class="oceanrag-lead-error" role="alert"></div>
+    `;
+    const consentText = formElement.querySelector(".oceanrag-lead-consent-text");
+    consentText.textContent = action?.consent_text || leadConsentText;
+    const idempotencyKey = () => (
+      window.crypto?.randomUUID?.()
+      || "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+        const random = Math.random() * 16 | 0;
+        const value = character === "x" ? random : (random & 0x3 | 0x8);
+        return value.toString(16);
+      })
+    );
+    let submissionKey = idempotencyKey();
+
+    formElement.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const values = new FormData(formElement);
+      const email = String(values.get("email") || "").trim();
+      const phone = String(values.get("phone") || "").trim();
+      const errorElement = formElement.querySelector(".oceanrag-lead-error");
+      const submitButton = formElement.querySelector('button[type="submit"]');
+      if (!email && !phone) {
+        errorElement.textContent = "Enter an email address or phone number.";
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = "Submitting...";
+      errorElement.textContent = "";
+      try {
+        const response = await fetch(`${API_URL}/api/client/widget/leads`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Widget-Key": WIDGET_PUBLIC_KEY,
+          },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            idempotency_key: submissionKey,
+            name: String(values.get("name") || "").trim(),
+            email: email || null,
+            phone: phone || null,
+            message: String(values.get("message") || "").trim() || null,
+            consent: values.get("consent") === "on",
+            consent_text_version: action?.consent_text_version || leadConsentTextVersion,
+          }),
+        });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const detail = error?.error?.message || error?.detail?.message || error?.detail;
+          throw new Error(typeof detail === "string" ? detail : "Could not submit the enquiry.");
+        }
+
+        formElement.remove();
+        addMessage(
+          "Your enquiry has been submitted. The business team can review it and contact you.",
+          "bot",
+        );
+        showConversationRating();
+      } catch (error) {
+        errorElement.textContent = error.message || "Could not submit the enquiry. Please try again.";
+        submitButton.disabled = false;
+        submitButton.textContent = "Review and submit enquiry";
+      }
+    });
+
+    messagesBox.appendChild(formElement);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+  }
+
+  function showConversationRating() {
+    if (!messagesBox || !conversationId) return;
+    if (messagesBox.querySelector(".oceanrag-feedback-card")) return;
+    const card = document.createElement("div");
+    card.className = "oceanrag-feedback-card";
+    const prompt = document.createElement("p");
+    prompt.textContent = "How was your experience with this assistant?";
+    card.appendChild(prompt);
+    const stars = document.createElement("div");
+    stars.className = "oceanrag-feedback-stars";
+    stars.setAttribute("role", "group");
+    stars.setAttribute("aria-label", "Rate your experience from 1 to 5 stars");
+    for (let rating = 1; rating <= 5; rating += 1) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "★";
+      button.setAttribute("aria-label", `${rating} star${rating === 1 ? "" : "s"}`);
+      button.addEventListener("click", async () => {
+        stars.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+        try {
+          const response = await fetch(
+            `${API_URL}/api/client/widget/conversations/${encodeURIComponent(conversationId)}/feedback`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Widget-Key": WIDGET_PUBLIC_KEY,
+              },
+              body: JSON.stringify({ rating }),
+            },
+          );
+          if (!response.ok) throw new Error("Rating was not accepted.");
+          prompt.textContent = "Thank you for your feedback.";
+          stars.remove();
+        } catch {
+          prompt.textContent = "Could not save your rating. Please try again.";
+          stars.querySelectorAll("button").forEach((item) => { item.disabled = false; });
+        }
+      });
+      stars.appendChild(button);
+    }
+    card.append(prompt, stars);
+    messagesBox.appendChild(card);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+  }
+
   function renderWidget() {
     const container = document.createElement("div");
     container.id = "oceanrag-widget-root";
@@ -231,6 +372,7 @@
             <span class="oceanrag-pulse-dot" aria-hidden="true"></span>
             <span id="oceanrag-title" class="oceanrag-title">Chat Assistant</span>
           </div>
+          <button id="oceanrag-contact-btn" class="oceanrag-contact-btn" type="button">Contact us</button>
           <button id="oceanrag-close-btn" class="oceanrag-close-btn" title="Minimize Chat" aria-label="Close chat">&times;</button>
         </div>
 
@@ -250,6 +392,8 @@
     launcher = document.getElementById("oceanrag-launcher");
     chatbox = document.getElementById("oceanrag-chatbox");
     closeBtn = document.getElementById("oceanrag-close-btn");
+    contactBtn = document.getElementById("oceanrag-contact-btn");
+    contactBtn.disabled = true;
     textInput = document.getElementById("oceanrag-text-input");
     form = document.getElementById("oceanrag-input-form");
     messagesBox = document.getElementById("oceanrag-messages");
@@ -269,6 +413,9 @@
     closeBtn.addEventListener("click", () => {
       closeChatbox();
       launcher.focus();
+    });
+    contactBtn.addEventListener("click", () => {
+      showContactForm();
     });
 
     // Escape closes the panel (accessibility).
@@ -377,6 +524,12 @@
 
         // Citations are intentionally NOT shown to end users.
         addMessage(data.answer, "bot");
+        if (Array.isArray(data.actions)) {
+          const contactAction = data.actions.find(
+            (action) => action.type === "contact_enquiry",
+          );
+          if (contactAction) showContactForm(contactAction);
+        }
       } else {
         let fallback = "⚠️ Failed to process your request. Please try again later.";
         if (response.status === 403) {
@@ -430,6 +583,8 @@
         headerTitle = data.launcher_label || data.display_name || headerTitle;
         accentColor = data.accent_color || null;
         starterPrompts = Array.isArray(data.starter_prompts) ? data.starter_prompts : [];
+        leadConsentText = data.lead_consent_text || "";
+        leadConsentTextVersion = data.lead_consent_text_version || "";
       } else {
         console.warn("OceanRAG Widget: Failed to load configuration");
         return;
@@ -490,6 +645,7 @@
     }
     textInput.disabled = false;
     if (sendButton) sendButton.disabled = false;
+    if (contactBtn) contactBtn.disabled = !conversationId;
     messagesBox.scrollTop = messagesBox.scrollHeight;
   }
 

@@ -8,9 +8,11 @@ from app.api.admin.applications import router as admin_applications_router
 from app.api.admin.conversations import router as admin_conversations_router
 from app.api.admin.documents import router as admin_documents_router
 from app.api.admin.knowledge_bases import router as admin_knowledge_bases_router
+from app.api.admin.leads import router as admin_leads_router
 from app.api.admin.settings import router as admin_settings_router
 from app.api.admin.widgets import router as admin_widgets_router
 from app.api.client.chat import router as client_chat_router
+from app.api.client.leads import router as client_leads_router
 from app.api.client.conversations import router as client_conversations_router
 from app.api.admin.ingestion import router as admin_ingestion_router
 from app.api.admin.conversation_debug import (
@@ -49,7 +51,12 @@ api_router.include_router(
     admin_conversations_router,
     dependencies=_admin_dependencies,
 )
+api_router.include_router(
+    admin_leads_router,
+    dependencies=_admin_dependencies,
+)
 api_router.include_router(client_chat_router)
+api_router.include_router(client_leads_router)
 api_router.include_router(client_conversations_router)
 api_router.include_router(
     admin_conversation_debug_router,

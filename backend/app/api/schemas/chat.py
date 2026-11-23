@@ -33,10 +33,18 @@ class CitationResponse(BaseModel):
     source_uri: str | None = None
 
 
+class ChatActionResponse(BaseModel):
+    type: str
+    label: str
+    consent_text: str
+    consent_text_version: str
+
+
 class ChatMessageResponse(BaseModel):
     conversation_id: str
     answer: str
     citations: list[CitationResponse] = Field(
         default_factory=list,
     )
+    actions: list[ChatActionResponse] = Field(default_factory=list)
     created_at: datetime

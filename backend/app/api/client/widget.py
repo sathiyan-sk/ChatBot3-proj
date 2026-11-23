@@ -21,6 +21,10 @@ from app.api.schemas.widgets import (
     WidgetSessionRequest,
     WidgetSessionResponse,
 )
+from app.modules.leads.domain.policies import (
+    LEAD_CONSENT_TEXT,
+    LEAD_CONSENT_TEXT_VERSION,
+)
 from app.modules.conversations.application.commands import ResolveConversationCommand
 from app.modules.conversations.application.queries import (
     GetConversationDetailQuery,
@@ -59,14 +63,14 @@ def get_widget_configuration(
 ) -> PublicWidgetConfigurationResponse:
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
-    configuration = (
-        service.get_public_configuration(
-            x_widget_key or "",
-        )
+    configuration = service.get_public_configuration(
+        x_widget_key or "",
     )
 
     return PublicWidgetConfigurationResponse(
         **configuration,
+        lead_consent_text=LEAD_CONSENT_TEXT,
+        lead_consent_text_version=LEAD_CONSENT_TEXT_VERSION,
     )
 
 

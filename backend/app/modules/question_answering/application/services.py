@@ -5,21 +5,37 @@ from dataclasses import dataclass
 from collections.abc import Callable
 
 from app.core.exceptions import ApplicationError
-from app.knowledge_engine.pipelines.question_answering_pipeline import QuestionAnsweringPipeline
+from app.knowledge_engine.pipelines.question_answering_pipeline import (
+    QuestionAnsweringPipeline,
+)
 from app.knowledge_engine.shared.models import QuestionAnsweringPipelineRequest
 from app.modules.question_answering.application.commands import AskChatQuestionCommand
 from app.modules.question_answering.application.dto import AskChatQuestionResultDto
+from app.modules.question_answering.application.dto import ChatActionDto
 from app.modules.question_answering.contracts.response_models import CitationItem
 from app.modules.conversations.application.commands import (
     AppendMessageCommand,
     ResolveConversationCommand,
 )
 from app.modules.conversations.application.queries import GetConversationDetailQuery
-from app.modules.conversations.application.services import ConversationApplicationService
-from app.modules.documents.domain.repository_interfaces import DocumentRepositoryInterface
-from app.modules.knowledge_bases.domain.repository_interfaces import KnowledgeBaseRepositoryInterface
-from app.modules.settings.domain.repository_interfaces import SettingsRepositoryInterface
+from app.modules.conversations.application.services import (
+    ConversationApplicationService,
+)
+from app.modules.documents.domain.repository_interfaces import (
+    DocumentRepositoryInterface,
+)
+from app.modules.knowledge_bases.domain.repository_interfaces import (
+    KnowledgeBaseRepositoryInterface,
+)
+from app.modules.settings.domain.repository_interfaces import (
+    SettingsRepositoryInterface,
+)
 from app.modules.settings.domain.entities import PlatformSettings
+from app.modules.leads.domain.policies import (
+    LEAD_CONSENT_TEXT,
+    LEAD_CONSENT_TEXT_VERSION,
+    has_contact_intent,
+)
 
 
 @dataclass(slots=True)
@@ -42,35 +58,40 @@ class ChatApplicationService:
                 status_code=400,
             )
 
-        knowledge_base = self.knowledge_base_repository.get_by_application_id(command.application_id)
-        if knowledge_base is None:
-            raise ApplicationError(
-                message="Knowledge base not found for application.",
-                code="knowledge_base_not_found",
-                status_code=404,
-            )
-
-        ready_documents = [
-            item
-            for item in self.document_repository.list_by_knowledge_base_id(
-                knowledge_base_id=knowledge_base.id
-            )
-            if item.ready_version is not None
-            and item.status in {"ready", "processing", "failed"}
-        ]
-        if not ready_documents:
-            raise ApplicationError(
-                message=(
-                    "No ready documents are available for question answering yet. "
-                    "Upload or ingest content, then wait for the index to finish processing."
-                ),
-                code="knowledge_base_has_no_ready_documents",
-                status_code=409,
-            )
-
         application_settings = self.settings_repository.get_by_application_id(
             command.application_id
         )
+        contact_intent = has_contact_intent(message_text)
+
+        knowledge_base = None
+        if not contact_intent:
+            knowledge_base = self.knowledge_base_repository.get_by_application_id(
+                command.application_id
+            )
+            if knowledge_base is None:
+                raise ApplicationError(
+                    message="Knowledge base not found for application.",
+                    code="knowledge_base_not_found",
+                    status_code=404,
+                )
+
+            ready_documents = [
+                item
+                for item in self.document_repository.list_by_knowledge_base_id(
+                    knowledge_base_id=knowledge_base.id
+                )
+                if item.ready_version is not None
+                and item.status in {"ready", "processing", "failed"}
+            ]
+            if not ready_documents:
+                raise ApplicationError(
+                    message=(
+                        "No ready documents are available for question answering yet. "
+                        "Upload or ingest content, then wait for the index to finish processing."
+                    ),
+                    code="knowledge_base_has_no_ready_documents",
+                    status_code=409,
+                )
 
         conversation = self.conversation_service.resolve_conversation(
             ResolveConversationCommand(
@@ -93,18 +114,45 @@ class ChatApplicationService:
             )
         )
 
-        conversation_detail = (
-    self.conversation_service.get_conversation_detail(
-        GetConversationDetailQuery(
-            conversation_id=str(
-                conversation.id,
-            ),
-            application_id=str(
-                command.application_id,
-            ),
+        if contact_intent:
+            answer_text = (
+                "I can help you send an enquiry to the business team. "
+                "Use the contact form below to share your details and confirm "
+                "that you agree to be contacted."
+            )
+            assistant_message = self.conversation_service.append_message(
+                AppendMessageCommand(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=answer_text,
+                )
+            )
+            return AskChatQuestionResultDto(
+                conversation_id=str(conversation.id),
+                user_message_id=str(user_message.id),
+                assistant_message_id=str(assistant_message.id),
+                answer_text=answer_text,
+                citations=[],
+                actions=[
+                    ChatActionDto(
+                        type="contact_enquiry",
+                        label="Submit an enquiry",
+                        consent_text=LEAD_CONSENT_TEXT,
+                        consent_text_version=LEAD_CONSENT_TEXT_VERSION,
+                    )
+                ],
+            )
+
+        conversation_detail = self.conversation_service.get_conversation_detail(
+            GetConversationDetailQuery(
+                conversation_id=str(
+                    conversation.id,
+                ),
+                application_id=str(
+                    command.application_id,
+                ),
+            )
         )
-    )
-)
 
         question_answering_pipeline = self.question_answering_pipeline_factory(
             application_settings
@@ -145,22 +193,20 @@ class ChatApplicationService:
                 role="assistant",
                 content=pipeline_result.answer_text,
                 citation_payload=json.dumps(
-    [
-        {
-            "document_id": str(item.document_id),
-            "document_title": str(
-                item.document_title
-            ),
-            "chunk_id": str(item.chunk_id),
-            "source_uri": (
-                str(item.source_uri)
-                if item.source_uri is not None
-                else None
-            ),
-        }
-        for item in pipeline_result.citations
-    ]
-),
+                    [
+                        {
+                            "document_id": str(item.document_id),
+                            "document_title": str(item.document_title),
+                            "chunk_id": str(item.chunk_id),
+                            "source_uri": (
+                                str(item.source_uri)
+                                if item.source_uri is not None
+                                else None
+                            ),
+                        }
+                        for item in pipeline_result.citations
+                    ]
+                ),
             )
         )
 
@@ -170,18 +216,15 @@ class ChatApplicationService:
             assistant_message_id=str(assistant_message.id),
             answer_text=pipeline_result.answer_text,
             citations=[
-    CitationItem(
-        document_id=str(item.document_id),
-        document_title=str(
-            item.document_title
-        ),
-        chunk_id=str(item.chunk_id),
-        source_uri=(
-            str(item.source_uri)
-            if item.source_uri is not None
-            else None
-        ),
-    )
-    for item in pipeline_result.citations
-],
+                CitationItem(
+                    document_id=str(item.document_id),
+                    document_title=str(item.document_title),
+                    chunk_id=str(item.chunk_id),
+                    source_uri=(
+                        str(item.source_uri) if item.source_uri is not None else None
+                    ),
+                )
+                for item in pipeline_result.citations
+            ],
+            actions=[],
         )
