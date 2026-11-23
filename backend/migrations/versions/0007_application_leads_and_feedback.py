@@ -1,6 +1,6 @@
 """Add application-owned leads and conversation feedback.
 
-Revision ID: 0007_application_leads_and_feedback
+Revision ID: 0007_leads_feedback
 Revises: 0006_application_ai_selections
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0007_application_leads_and_feedback"
+revision = "0007_leads_feedback"
 down_revision = "0006_application_ai_selections"
 branch_labels = None
 depends_on = None
