@@ -160,7 +160,7 @@ def _pipeline_settings(parser_provider: str):
             parser=parser_provider,
         ),
         vector_store_table_name="chunks",
-        vector_store_dimension=3,
+        vector_store_dimension=1024,
     )
 
 
@@ -356,11 +356,11 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
 
     class FakeEmbeddings(EmbeddingsContract):
         def embed_query(self, text):
-            return [0.1, 0.2, 0.3]
+            return [0.1] * 1024
 
         def embed_documents(self, texts):
             assert texts
-            return [[0.1, 0.2, 0.3] for _ in texts]
+            return [[0.1] * 1024 for _ in texts]
 
     class FakeVectorStore:
         def __init__(self):
@@ -405,7 +405,7 @@ def test_native_pdf_runs_through_chunks_embedding_and_index(monkeypatch):
     assert result.chunk_count > 0
     assert len(vector_store.indexed) == result.chunk_count
     assert all(isinstance(chunk, EmbeddedChunk) for chunk in vector_store.indexed)
-    assert all(chunk.embedding == [0.1, 0.2, 0.3] for chunk in vector_store.indexed)
+    assert all(chunk.embedding == [0.1] * 1024 for chunk in vector_store.indexed)
     assert "Support policy section" in " ".join(
         chunk.content for chunk in vector_store.indexed
     )
