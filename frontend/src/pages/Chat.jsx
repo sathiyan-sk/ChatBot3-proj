@@ -1,24 +1,15 @@
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { apiClient } from "@/api/client";
-import { Send, Cpu, MessageSquare, Trash2, Copy, ThumbsUp, KeyRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Copy, KeyRound, MessageSquare, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Card, Button, Badge } from "@/components/ui/Primitives";
-import { Input, Select } from "@/components/ui/Form";
+import { apiClient } from "@/api/client";
+import { Badge, Button, Card } from "@/components/ui/Primitives";
+import { Input } from "@/components/ui/Form";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const API_KEY_STORAGE = "oceanrag_chat_api_key";
+const HISTORY_KEY_PREFIX = "oceanrag_chat_history";
 
-/* ============================================================
-   CHAT CONSOLE
-   Admin-facing RAG test surface. Rebuilt on the shared surface/
-   control tokens while keeping the message animation behaviour
-   and markdown-lite rendering intact.
-   ============================================================ */
-
-// Strip bracketed citation markers like [1], [4], [10] that the LLM
-// sometimes appends to answers - end users don't need them.
 function stripCitationMarkers(text) {
   return String(text || "").replace(/\s*\[\d+\]/g, "");
 }
@@ -27,419 +18,291 @@ export default function Chat() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [configInfo, setConfigInfo] = useState(null);
-  const [topK, setTopK] = useState(4);
-  const [conversationId, setConversationId] = useState(null);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(API_KEY_STORAGE) || "");
+  const [apiKey, setApiKey] = useState(
+    () => localStorage.getItem(API_KEY_STORAGE) || ""
+  );
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [resolvedApplicationId, setResolvedApplicationId] = useState("");
+  const [conversationId, setConversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
-  // Load chat history from localStorage on mount
   useEffect(() => {
-    let isMounted = true;
-
-    const loadHistory = () => {
-      const saved = localStorage.getItem("oceanrag_chat_history");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (isMounted) {
-            setMessages(parsed.messages || []);
-            setConversationId(parsed.conversationId || null);
-          }
-        } catch (e) {
-          console.error("Error loading chat history", e);
-        }
-      } else if (isMounted) {
-        // System greeting
+    if (!resolvedApplicationId) return;
+    queueMicrotask(() => {
+      const saved = localStorage.getItem(
+        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`
+      );
+      if (!saved) {
         setMessages([
           {
             id: "welcome",
             role: "bot",
-            content:
-              "Welcome to **RENAI Chatbot**! I am your premium AI assistant powered by the local RAG engine. Upload files in the **Admin Console** to build my knowledge base, or ask me any general question right away.",
+            content: "Hello. What would you like to know?",
             timestamp: new Date().toISOString(),
-            sources: [],
           },
         ]);
+        setConversationId(null);
+        return;
       }
-    };
-
-    loadHistory();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Save messages to localStorage
-  useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem("oceanrag_chat_history", JSON.stringify({ messages, conversationId }));
-    } else {
-      localStorage.removeItem("oceanrag_chat_history");
-    }
-  }, [messages, conversationId]);
-
-  // Fetch System Details
-  useEffect(() => {
-    const fetchSystemDetails = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/system/config`);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const configRes = await response.json();
-        setConfigInfo(configRes);
-      } catch (error) {
-        console.warn("Could not fetch system info, falling back to backend health defaults.", error);
-        setConfigInfo({
-          status: "degraded",
-          ollama_chat_model: "llama3",
-          ollama_embed_model: "nomic-embed-text",
-          app_name: "AI Knowledge Platform Backend",
-        });
+        const parsed = JSON.parse(saved);
+        setMessages(parsed.messages || []);
+        setConversationId(parsed.conversationId || null);
+      } catch {
+        setMessages([]);
+        setConversationId(null);
       }
-    };
-    fetchSystemDetails();
-  }, []);
+    });
+  }, [resolvedApplicationId]);
 
-  // Auto Scroll
+  useEffect(() => {
+    if (!resolvedApplicationId) return;
+    if (messages.length > 0) {
+      localStorage.setItem(
+        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`,
+        JSON.stringify({ messages, conversationId })
+      );
+    } else {
+      localStorage.removeItem(`${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`);
+    }
+  }, [messages, conversationId, resolvedApplicationId]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const saveApiKey = (value) => {
+    setApiKey(value);
+    if (value) {
+      localStorage.setItem(API_KEY_STORAGE, value);
+      setResolvedApplicationId("");
+      setConversationId(null);
+      setMessages([]);
+    } else {
+      localStorage.removeItem(API_KEY_STORAGE);
+      setResolvedApplicationId("");
+      setConversationId(null);
+      setMessages([]);
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     if (!question.trim() || isLoading) return;
 
-    const userMsg = {
+    const userMessage = {
       id: `user-${Date.now()}`,
       role: "user",
       content: question,
       timestamp: new Date().toISOString(),
     };
-
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((current) => [...current, userMessage]);
     const currentQuestion = question;
     setQuestion("");
     setIsLoading(true);
 
     try {
       const response = await apiClient.post(
-        "/client/chat/messages",
+        "/client/chat/preview/messages",
         {
-          conversation_identity: "web-user-" + (conversationId || Date.now()),
+          conversation_identity:
+            `customer-preview-${resolvedApplicationId || "unresolved"}-`
+            + (conversationId || Date.now()),
           message: currentQuestion,
           conversation_id: conversationId,
-          conversation_title: "Web Chat Session",
+          conversation_title: "Customer Preview",
         },
-        {
-          headers: {
-            "X-API-Key": apiKey,
-          },
-        }
+        { headers: { "X-API-Key": apiKey } }
       );
-
       const data = response.data;
+      if (data.application_id) setResolvedApplicationId(data.application_id);
+      if (data.conversation_id) setConversationId(data.conversation_id);
 
-      // Store conversation ID for subsequent messages
-      if (data.conversation_id && !conversationId) {
-        setConversationId(data.conversation_id);
-      }
-
-      const botMsg = {
-        id: `bot-${Date.now()}`,
-        role: "bot",
-        // Citations and bracketed [n] markers are intentionally hidden
-        // from end users - answers render as clean prose.
-        content: stripCitationMarkers(data.answer),
-        timestamp: new Date().toISOString(),
-        sources: [],
-        conversation_id: data.conversation_id,
-      };
-
-      setMessages((prev) => [...prev, botMsg]);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `bot-${Date.now()}`,
+          role: "bot",
+          content: stripCitationMarkers(data.answer),
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to fetch response from RAG engine.");
-
-      const errorMsg = {
-        id: `bot-err-${Date.now()}`,
-        role: "bot",
-        content:
-          "⚠️ **System Communication Error**: Failed to connect to the FastAPI RAG backend. Please verify your backend server is active and running correctly.",
-        timestamp: new Date().toISOString(),
-        sources: [],
-        is_error: true,
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      const detail =
+        error.response?.data?.error?.message
+        || error.response?.data?.detail?.message
+        || error.response?.data?.detail;
+      toast.error(
+        typeof detail === "string"
+          ? detail
+          : "Could not connect to the application. Check the API key."
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleClearHistory = () => {
+  const clearHistory = () => {
     setConversationId(null);
+    if (resolvedApplicationId) {
+      localStorage.removeItem(
+        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`
+      );
+    }
     setMessages([
       {
         id: `welcome-${Date.now()}`,
         role: "bot",
-        content: "Chat history cleared. I'm ready for your questions!",
+        content: "Hello. What would you like to know?",
         timestamp: new Date().toISOString(),
-        sources: [],
       },
     ]);
-    toast.success("Conversation history cleared.");
+    toast.success("Customer preview cleared.");
   };
 
-  const handleCopyMessage = (text) => {
+  const copyMessage = (text) => {
     navigator.clipboard.writeText(text);
-    toast.success("Message copied to clipboard.");
+    toast.success("Message copied.");
   };
 
   return (
-    <main className="flex-1 w-full flex flex-col max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-96px)] overflow-hidden">
-      {/* System Status Banner */}
+    <main className="mx-auto flex h-[calc(100vh-96px)] w-full max-w-[1400px] flex-col overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
       <Card
-        className="w-full p-4 mb-5 flex flex-wrap items-center justify-between gap-4"
+        className="mb-5 flex w-full flex-wrap items-center justify-between gap-4 p-4"
         data-testid="chat-system-status-banner"
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-[10px] bg-white/[0.04] border border-white/[0.08]">
-            <Cpu className="h-4 w-4 text-[#00D4FF]" aria-hidden="true" />
+          <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.04] p-2">
+            <MessageSquare className="h-4 w-4 text-[#00D4FF]" aria-hidden="true" />
           </div>
           <div>
-            <div className="text-card-title text-slate-100">RAG Engine Configuration</div>
-            <div className="text-slate-400 font-mono text-meta mt-0.5">
-              {configInfo
-                ? `LLM: ${configInfo.ollama_chat_model || "llama3"} • Embed: ${
-                    configInfo.ollama_embed_model || "nomic-embed"
-                  }`
-                : "Loading system config..."}
+            <div className="text-card-title text-slate-100">Customer Preview</div>
+            <div className="mt-1 text-[10px] text-slate-500">
+              Uses the application resolved from the API key.
             </div>
           </div>
         </div>
-
         <div className="flex flex-wrap items-center gap-3">
-          {configInfo?.status && (
-            <Badge variant={configInfo.status === "OK" ? "success" : "warning"}>
-              {configInfo.status === "OK" ? "healthy" : "degraded"}
-            </Badge>
-          )}
-
-          {/* API Key input */}
+          <Badge variant={resolvedApplicationId ? "success" : "warning"}>
+            {resolvedApplicationId ? "application resolved" : "key required"}
+          </Badge>
           <div className="flex items-center gap-1.5">
             <Button
               variant={apiKey ? "secondary" : "outline"}
               size="sm"
-              onClick={() => setShowKeyInput(!showKeyInput)}
-              title={apiKey ? "API key configured" : "Set API key"}
+              onClick={() => setShowKeyInput((current) => !current)}
               data-testid="chat-api-key-toggle"
             >
               <KeyRound className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{apiKey ? "Key Set" : "Set API Key"}</span>
+              <span className="hidden sm:inline">
+                {apiKey ? "API Key Set" : "Set API Key"}
+              </span>
             </Button>
             {showKeyInput && (
               <Input
-                type="text"
+                type="password"
                 value={apiKey}
-                onChange={(e) => {
-                  setApiKey(e.target.value);
-                  localStorage.setItem(API_KEY_STORAGE, e.target.value);
-                }}
+                onChange={(event) => saveApiKey(event.target.value)}
                 placeholder="akp_..."
-                className="w-44 h-8 py-0 font-mono text-[10px]"
+                className="h-8 w-48 py-0 font-mono text-[10px]"
                 data-testid="chat-api-key-input"
               />
             )}
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-meta text-slate-300 whitespace-nowrap">top_k</span>
-            <Select
-              value={topK}
-              onChange={(e) => setTopK(Number(e.target.value))}
-              className="w-16 h-8 py-0 text-[11px]"
-              aria-label="Search top_k chunks"
-              data-testid="select-top-k"
-            >
-              <option value={2}>2</option>
-              <option value={4}>4</option>
-              <option value={6}>6</option>
-              <option value={8}>8</option>
-            </Select>
-          </div>
-
           <Button
             variant="danger"
             size="sm"
-            onClick={handleClearHistory}
+            onClick={clearHistory}
             data-testid="chat-clear"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Clear Chat</span>
+            <span className="hidden sm:inline">Clear</span>
           </Button>
         </div>
       </Card>
 
-      {/* Messages List Area */}
-      <div className="flex-1 w-full overflow-y-auto pr-1 space-y-6 mb-4 max-h-[calc(100vh-320px)]">
+      <div className="mb-4 max-h-[calc(100vh-320px)] flex-1 space-y-6 overflow-y-auto pr-1">
         <AnimatePresence initial={false}>
-          {messages.map((msg) => (
+          {messages.map((message) => (
             <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 15 }}
+              key={message.id}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3 }}
-              className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
-              data-testid={msg.role === "user" ? "chat-message-user" : "chat-message-bot"}
+              exit={{ opacity: 0 }}
+              className={`flex flex-col ${
+                message.role === "user" ? "items-end" : "items-start"
+              }`}
+              data-testid={
+                message.role === "user" ? "chat-message-user" : "chat-message-bot"
+              }
             >
-              <div className="flex items-center gap-2 mb-1.5 text-[11px] text-slate-400 font-medium px-1">
-                <span>{msg.role === "user" ? "You" : "Assistant"}</span>
-                <span className="text-[10px] text-slate-500">•</span>
+              <div className="mb-1.5 flex items-center gap-2 px-1 text-[11px] font-medium text-slate-400">
+                <span>{message.role === "user" ? "You" : "Assistant"}</span>
+                <span>•</span>
                 <span>
-                  {new Date(msg.timestamp).toLocaleTimeString([], {
+                  {new Date(message.timestamp).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
                 </span>
               </div>
-
-              <div className="flex gap-3 max-w-[85%]">
-                {msg.role === "bot" && (
-                  <div className="hidden sm:flex h-8 w-8 rounded-full bg-gradient-to-br from-[#00D4FF] to-[#2563EB] items-center justify-center border border-white/[0.10] shadow-md flex-shrink-0">
+              <div className="flex max-w-[85%] gap-3">
+                {message.role === "bot" && (
+                  <div className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-white/[0.10] bg-gradient-to-br from-[#00D4FF] to-[#2563EB] shadow-md sm:flex">
                     <MessageSquare className="h-4 w-4 text-white" aria-hidden="true" />
                   </div>
                 )}
-
                 <div
-                  className={`rounded-card px-5 py-3.5 shadow-md leading-relaxed text-[13px] ${
-                    msg.role === "user"
-                      ? "bg-gradient-to-r from-[#2563EB] to-[#1E40AF] text-white rounded-tr-none border border-white/[0.10]"
+                  className={`rounded-card px-5 py-3.5 text-[13px] leading-relaxed shadow-md ${
+                    message.role === "user"
+                      ? "rounded-tr-none border border-white/[0.10] bg-gradient-to-r from-[#2563EB] to-[#1E40AF] text-white"
                       : "surface-card rounded-tl-none text-slate-200"
                   }`}
                 >
-                  {/* Dynamic Markdown simulation (simple bolding, lists, code highlight) */}
-                  <div className="whitespace-pre-wrap space-y-2">
-                    {msg.content.split("\n").map((line, idx) => {
-                      const boldRegex = /\*\*(.*?)\*\*/g;
-                      const matches = [...line.matchAll(boldRegex)];
-                      if (matches.length > 0) {
-                        return (
-                          <p key={idx} className="leading-relaxed">
-                            {line.split(/\*\*(.*?)\*\*/).map((part, index) => {
-                              const isBold = index % 2 === 1;
-                              return isBold ? (
-                                <strong key={index} className="text-[#00D4FF] font-semibold">
-                                  {part}
-                                </strong>
-                              ) : (
-                                part
-                              );
-                            })}
-                          </p>
-                        );
-                      }
-
-                      if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
-                        return (
-                          <li key={idx} className="ml-4 list-disc text-slate-300">
-                            {line.substring(2)}
-                          </li>
-                        );
-                      }
-                      if (/^\d+\.\s/.test(line.trim())) {
-                        const num = line.match(/^\d+\./)[0];
-                        return (
-                          <li key={idx} className="ml-4 list-decimal text-slate-300">
-                            <strong>{num}</strong> {line.replace(/^\d+\.\s/, "")}
-                          </li>
-                        );
-                      }
-                      return <p key={idx}>{line}</p>;
-                    })}
-                  </div>
-
-                  {/* Actions (Copy / Like) */}
-                  <div className="flex items-center gap-3 mt-4 pt-2.5 border-t border-white/[0.06] text-[11px] text-slate-400">
-                    <button
-                      onClick={() => handleCopyMessage(msg.content)}
-                      className="flex items-center gap-1 hover:text-[#00D4FF] transition focus-visible:outline-none"
-                      title="Copy content"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                      <span>Copy</span>
-                    </button>
-                    {msg.role === "bot" && (
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  {message.role === "bot" && (
+                    <div className="mt-4 flex items-center border-t border-white/[0.06] pt-2.5 text-[11px] text-slate-400">
                       <button
-                        onClick={() => toast.success("Feedback recorded! Thanks.")}
-                        className="flex items-center gap-1 hover:text-[#00D4FF] transition focus-visible:outline-none"
-                        title="Thumb up"
+                        onClick={() => copyMessage(message.content)}
+                        className="flex items-center gap-1 transition hover:text-[#00D4FF]"
+                        title="Copy content"
                       >
-                        <ThumbsUp className="h-3.5 w-3.5" />
-                        <span>Helpful</span>
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Copy</span>
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
-
         {isLoading && (
-          <div className="flex flex-col items-start" data-testid="chat-loading-indicator">
-            <div className="flex items-center gap-2 mb-1.5 text-[11px] text-slate-400 font-medium px-1">
-              <span>Assistant</span>
-              <span className="text-[10px] text-slate-500">•</span>
-              <span className="italic">Thinking...</span>
+          <div className="flex flex-col items-start">
+            <div className="mb-1.5 flex items-center gap-2 text-[11px] text-slate-400">
+              <span>Assistant</span><span>•</span><span>Thinking...</span>
             </div>
-            <div className="flex gap-3 max-w-[80%]">
-              <div className="hidden sm:flex h-8 w-8 rounded-full bg-surface border border-white/[0.10] items-center justify-center flex-shrink-0 animate-pulse">
-                <Cpu className="h-4 w-4 text-[#00D4FF]" />
-              </div>
-              <div className="surface-card rounded-card rounded-tl-none px-5 py-4 flex items-center gap-3">
-                <div className="flex space-x-1.5">
-                  <div
-                    className="w-2 h-2 bg-[#00D4FF] rounded-full animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 bg-[#00D4FF] rounded-full animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 bg-[#00D4FF] rounded-full animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  ></div>
-                </div>
-                <span className="text-meta text-slate-400 font-mono">
-                  Retrieving matching document vectors...
-                </span>
-              </div>
+            <div className="surface-card flex items-center gap-3 rounded-card px-5 py-4">
+              <span className="text-[10px] text-slate-400">Preparing a customer response...</span>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Sticky Bottom Input Area */}
       <form
         onSubmit={handleSubmit}
-        className="w-full surface-card rounded-card p-2.5 flex items-center gap-3 shadow-raised"
+        className="surface-card flex w-full items-center gap-3 rounded-card p-2.5 shadow-raised"
         data-testid="chat-form"
       >
         <input
           type="text"
           value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder={
-            isLoading ? "Generating RAG groundings..." : "Query your indexed knowledge base..."
-          }
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder="Ask a customer question..."
           disabled={isLoading}
-          className="flex-1 bg-transparent border-0 outline-none text-white placeholder-slate-500 text-[13px] py-2 px-3 focus:ring-0 focus:outline-none disabled:opacity-60"
+          className="flex-1 border-0 bg-transparent px-3 py-2 text-[13px] text-white outline-none placeholder-slate-500 disabled:opacity-60"
           data-testid="chat-input"
           required
         />

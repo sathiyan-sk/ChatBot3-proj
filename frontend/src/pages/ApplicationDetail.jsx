@@ -136,8 +136,15 @@ export default function ApplicationDetail() {
   const [sandboxHistory, setSandboxHistory] = useState([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatTopK, setChatTopK] = useState(4);
+  const [sandboxConversationId, setSandboxConversationId] = useState(null);
   const [sandboxApiKey, setSandboxApiKey] = useState(
-    () => localStorage.getItem("oceanrag_sandbox_api_key") || ""
+    () => {
+      try {
+        return JSON.parse(localStorage.getItem("oceanrag_sandbox_api_keys") || "{}")[id] || "";
+      } catch {
+        return "";
+      }
+    }
   );
   const [showSandboxKeyInput, setShowSandboxKeyInput] = useState(false);
 
@@ -723,6 +730,8 @@ export default function ApplicationDetail() {
           message: userMsg.content,
           conversation_title: "Admin Sandbox Test",
           top_k: chatTopK,
+          conversation_id: sandboxConversationId,
+          application_id: id,
         },
         {
           headers: {
@@ -732,6 +741,7 @@ export default function ApplicationDetail() {
       );
 
       const data = response.data;
+      if (data.conversation_id) setSandboxConversationId(data.conversation_id);
       const botMsg = {
         role: "bot",
         content: data.answer,
@@ -1527,9 +1537,12 @@ export default function ApplicationDetail() {
             <Card className="p-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2 text-xs">
                 <Terminal className="h-4 w-4 text-[#00D4FF]" aria-hidden="true" />
-                <span className="font-semibold text-slate-200">Sandbox Testing Layer</span>
+                <span className="font-semibold text-slate-200">Application Chat Sandbox</span>
                 <span className="text-slate-600">•</span>
                 <span className="text-slate-400 font-mono text-[11px]">POST /api/client/chat/messages</span>
+                <Badge variant="neutral" className="ml-1">
+                  {app.name}
+                </Badge>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -1550,8 +1563,23 @@ export default function ApplicationDetail() {
                       type="text"
                       value={sandboxApiKey}
                       onChange={(e) => {
-                        setSandboxApiKey(e.target.value);
-                        localStorage.setItem("oceanrag_sandbox_api_key", e.target.value);
+                        const value = e.target.value;
+                        setSandboxApiKey(value);
+                        try {
+                          const savedKeys = JSON.parse(
+                            localStorage.getItem("oceanrag_sandbox_api_keys") || "{}"
+                          );
+                          savedKeys[id] = value;
+                          localStorage.setItem(
+                            "oceanrag_sandbox_api_keys",
+                            JSON.stringify(savedKeys)
+                          );
+                        } catch {
+                          localStorage.setItem(
+                            "oceanrag_sandbox_api_keys",
+                            JSON.stringify({ [id]: value })
+                          );
+                        }
                       }}
                       placeholder="akp_..."
                       className="w-44 h-8 py-0 font-mono text-[10px]"
@@ -1579,6 +1607,7 @@ export default function ApplicationDetail() {
                   size="sm"
                   onClick={() => {
                     setSandboxHistory([]);
+                    setSandboxConversationId(null);
                     toast.success("Sandbox history reset.");
                   }}
                   data-testid="chat-sandbox-clear"

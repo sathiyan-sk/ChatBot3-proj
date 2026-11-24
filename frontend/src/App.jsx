@@ -71,7 +71,14 @@ function AppContent() {
         <Route path="/dashboard" element={<Navigate to="/admin/applications" replace />} />
         <Route path="/dashboard/:id" element={<Navigate to={`/admin/applications/${window.location.pathname.split("/")[2]}`} replace />} />
         {/* Chat */}
-        <Route path="/chat" element={<Chat />} />
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <Chat />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/admin/applications" replace />} />
       </Routes>
     </>

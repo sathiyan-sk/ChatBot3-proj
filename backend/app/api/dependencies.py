@@ -13,6 +13,7 @@ from app.config.settings import Settings
 from app.config.provider_registry import (
     build_provider_catalog,
     is_supported_selection,
+    platform_default_selection,
     resolve_application_selection,
 )
 from app.core.exceptions import ConfigurationError
@@ -167,7 +168,7 @@ def clear_cors_cache(
     widget_key: str | None = None,
 ) -> None:
     """Clear the DynamicCorsMiddleware cache.
-    
+
     Args:
         request: FastAPI Request object
         widget_key: Specific widget key to clear, or None to clear all cache
@@ -407,9 +408,7 @@ def build_question_answering_pipeline(
     )
 
     return QuestionAnsweringPipeline(
-        conversation_context_builder=(
-            ConversationContextBuilder()
-        ),
+        conversation_context_builder=(ConversationContextBuilder()),
         query_embedder=(
             QueryEmbedder(
                 embeddings_contract=embeddings_provider,
@@ -459,13 +458,33 @@ def get_question_answering_pipeline(
     )
 
 
+def build_platform_llm_provider(settings: Settings):
+    provider_name, model_name = platform_default_selection(
+        settings,
+        capability="llm",
+    )
+    return _build_llm_provider(
+        settings,
+        provider_name=provider_name,
+        model_name=model_name,
+    )
+
+
+def get_platform_llm_provider(request: Request):
+    provider = build_platform_llm_provider(get_settings(request))
+    return TracedLlmProvider(
+        provider=provider,
+        trace_observer=request.app.state.trace_observer,
+    )
+
+
 def get_chat_application_service(
-        request: Request,
-        session: Session = Depends(get_session),
-        conversation_service: ConversationApplicationService = Depends(
+    request: Request,
+    session: Session = Depends(get_session),
+    conversation_service: ConversationApplicationService = Depends(
         get_conversation_application_service,
-        ),
-        ) -> ChatApplicationService:
+    ),
+) -> ChatApplicationService:
     settings = get_settings(request)
     trace_observer = request.app.state.trace_observer
 
@@ -518,11 +537,9 @@ def build_knowledge_ingestion_pipeline(
     session: Session,
     application_settings: PlatformSettings | None = None,
 ) -> KnowledgeIngestionPipeline:
-
     storage_provider = SupabaseStorageProvider(
         settings=settings.storage,
     )
-
 
     embedding_provider_name, embedding_model_name = resolve_application_selection(
         settings,
@@ -544,11 +561,15 @@ def build_knowledge_ingestion_pipeline(
         source_loader = FileSourceLoader(
             storage_contract=storage_provider,
         )
-        parser_provider = resolve_application_selection(
-            settings,
-            application_settings,
-            capability="parser",
-        )[0].strip().lower()
+        parser_provider = (
+            resolve_application_selection(
+                settings,
+                application_settings,
+                capability="parser",
+            )[0]
+            .strip()
+            .lower()
+        )
         if parser_provider == "auto":
             if source_type == "pdf":
                 parser = QualityAwareDocumentParser(
@@ -639,9 +660,7 @@ def build_knowledge_ingestion_pipeline(
         )
 
     else:
-        raise ValueError(
-            f"Unsupported ingestion source type: {source_type}."
-        )
+        raise ValueError(f"Unsupported ingestion source type: {source_type}.")
 
     return KnowledgeIngestionPipeline(
         source_loader=source_loader,

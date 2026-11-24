@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class ChatMessageRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
+    application_id: str | None = Field(default=None, min_length=1, max_length=36)
     conversation_id: str | None = Field(
         default=None,
     )
@@ -42,6 +43,7 @@ class ChatActionResponse(BaseModel):
 
 class ChatMessageResponse(BaseModel):
     conversation_id: str
+    application_id: str | None = None
     answer: str
     citations: list[CitationResponse] = Field(
         default_factory=list,

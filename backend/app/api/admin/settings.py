@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, Request, status
 
 from app.api.dependencies import get_settings_application_service
@@ -90,6 +92,7 @@ def get_settings_by_application(
     data["id"] = str(data["id"])
     data["application_id"] = str(data["application_id"])
     return SettingsResponse.model_validate(data)
+
 
 @router.put("/by-application/{application_id}", response_model=SettingsResponse)
 def update_settings(

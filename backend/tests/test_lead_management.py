@@ -8,6 +8,9 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import ApplicationError
+from fastapi import HTTPException
+from app.api.client.chat import create_chat_message
+from app.api.client.chat import create_customer_preview_message
 from app.api.dependencies import require_admin
 from app.api.router import api_router
 from app.api.admin.leads import _csv_cell
@@ -400,6 +403,57 @@ def test_feedback_read_routes_are_admin_authenticated_and_read_only():
         assert require_admin in {
             dependency.call for dependency in route.dependant.dependencies
         }
+
+
+def test_chat_request_rejects_application_id_mismatched_with_api_key():
+    context = SimpleNamespace(application_id=APP_ID)
+
+    class _UnusedService:
+        def ask(self, _command):
+            pytest.fail("mismatched application/key must fail before RAG")
+
+    with pytest.raises(HTTPException) as error:
+        create_chat_message(
+            SimpleNamespace(
+                application_id=str(uuid4()),
+                conversation_identity="sandbox-test",
+                message="Test",
+                conversation_title="Sandbox",
+                top_k=4,
+            ),
+            SimpleNamespace(state=SimpleNamespace(request_id=None)),
+            context,
+            _UnusedService(),
+        )
+
+    assert error.value.status_code == 403
+    assert error.value.detail["code"] == "chat_application_key_mismatch"
+
+
+def test_customer_preview_without_key_uses_platform_generation():
+    class _PlatformProvider:
+        def generate(self, **_kwargs):
+            return SimpleNamespace(
+                text="Platform-default response",
+            )
+
+    response = create_customer_preview_message(
+        request=SimpleNamespace(
+            conversation_identity="customer-preview",
+            conversation_title="Customer Preview",
+            message="Hello",
+            top_k=5,
+        ),
+        http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
+        application_context=None,
+        service=SimpleNamespace(),
+        platform_llm_provider=_PlatformProvider(),
+    )
+
+    assert response.application_id is None
+    assert response.answer == "Platform-default response"
+    assert response.citations == []
+    assert response.actions == []
 
 
 @pytest.mark.parametrize(

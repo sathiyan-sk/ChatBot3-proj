@@ -60,14 +60,33 @@ def get_client_application_context(
             ),
         )
 
-        return (
-            security_service.resolve_application_context(
-                normalized_api_key,
-            )
+        return security_service.resolve_application_context(
+            normalized_api_key,
         )
 
     finally:
         session.close()
+
+
+def get_optional_client_application_context(
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+    container: ApplicationContainer = Depends(get_container),
+) -> ClientApplicationContext | None:
+    normalized_api_key = x_api_key.strip()
+    if not normalized_api_key:
+        return None
+
+    session = container.session_factory()
+    try:
+        security_service = ClientSecurityServices(
+            client_security_repository=ClientSecuritySqlAlchemyRepository(
+                session=session
+            )
+        )
+        return security_service.resolve_application_context(normalized_api_key)
+    finally:
+        session.close()
+
 
 def get_widget_application_id(
     request: Request,
@@ -145,9 +164,7 @@ def get_widget_application_id(
                         and parsed.password is None
                         and (parsed.port is None or 0 < parsed.port <= 65535)
                     ):
-                        request_origin = (
-                            f"{parsed.scheme}://{parsed.netloc}"
-                        )
+                        request_origin = f"{parsed.scheme}://{parsed.netloc}"
                 except ValueError:
                     request_origin = None
 
@@ -164,7 +181,7 @@ def get_widget_application_id(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Origin is not allowed for this application.",
             )
-            
+
         return str(widget.application_id)
 
     finally:
