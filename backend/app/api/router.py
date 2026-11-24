@@ -7,6 +7,7 @@ from app.api.dependencies import require_admin
 from app.api.admin.applications import router as admin_applications_router
 from app.api.admin.conversations import router as admin_conversations_router
 from app.api.admin.documents import router as admin_documents_router
+from app.api.admin.feedback import router as admin_feedback_router
 from app.api.admin.knowledge_bases import router as admin_knowledge_bases_router
 from app.api.admin.leads import router as admin_leads_router
 from app.api.admin.settings import router as admin_settings_router
@@ -53,6 +54,10 @@ api_router.include_router(
 )
 api_router.include_router(
     admin_leads_router,
+    dependencies=_admin_dependencies,
+)
+api_router.include_router(
+    admin_feedback_router,
     dependencies=_admin_dependencies,
 )
 api_router.include_router(client_chat_router)

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from app.core.exceptions import ApplicationError
+from app.api.dependencies import require_admin
+from app.api.router import api_router
 from app.api.admin.leads import _csv_cell
 from app.modules.leads.application.services import LeadManagementService
-from app.modules.leads.domain.entities import ConversationFeedback, Lead
+from app.modules.leads.domain.entities import (
+    ConversationFeedback,
+    ConversationFeedbackEntry,
+    FeedbackAnalytics,
+    FeedbackRatingCount,
+    Lead,
+)
 from app.modules.leads.domain.policies import (
     LEAD_CONSENT_TEXT_VERSION,
     has_contact_intent,
@@ -23,6 +31,7 @@ class _MemoryLeadRepository:
     def __init__(self):
         self.leads = {}
         self.feedback = {}
+        self.conversation_titles = {}
         self.create_count = 0
 
     def conversation_belongs_to_application(self, *, conversation_id, application_id):
@@ -81,6 +90,59 @@ class _MemoryLeadRepository:
         self.feedback[conversation_id] = feedback
         return feedback
 
+    def feedback_analytics_for_application(
+        self, *, application_id, created_from, created_to, rating
+    ):
+        matching = self._matching_feedback(
+            application_id, created_from, created_to, rating
+        )
+        count = len(matching)
+        distribution = {
+            star: sum(item.rating == star for item in matching) for star in range(1, 6)
+        }
+        return FeedbackAnalytics(
+            response_count=count,
+            average_rating=(
+                sum(item.rating for item in matching) / count if count else 0.0
+            ),
+            five_star_responses=distribution[5],
+            positive_rating_percentage=(
+                sum(item.rating >= 4 for item in matching) * 100.0 / count
+                if count
+                else 0.0
+            ),
+            distribution=tuple(
+                FeedbackRatingCount(rating=star, count=distribution[star])
+                for star in range(1, 6)
+            ),
+        )
+
+    def list_feedback_for_application(
+        self, *, application_id, created_from, created_to, rating, limit, offset
+    ):
+        matching = sorted(
+            self._matching_feedback(application_id, created_from, created_to, rating),
+            key=lambda item: (item.created_at, item.id),
+            reverse=True,
+        )
+        return [
+            ConversationFeedbackEntry(
+                feedback=item,
+                conversation_title=self.conversation_titles.get(item.conversation_id),
+            )
+            for item in matching[offset : offset + limit]
+        ]
+
+    def _matching_feedback(self, application_id, created_from, created_to, rating):
+        return [
+            item
+            for item in self.feedback.values()
+            if item.application_id == application_id
+            and (created_from is None or item.created_at >= created_from)
+            and (created_to is None or item.created_at < created_to)
+            and (rating is None or item.rating == rating)
+        ]
+
     def update_for_application(self, *, application_id, lead_id, status, internal_note):
         for key, lead in self.leads.items():
             if lead.application_id == application_id and lead.id == lead_id:
@@ -120,6 +182,21 @@ def _submit(service, **overrides):
     }
     values.update(overrides)
     return service.submit(**values)
+
+
+def _record_feedback(repository, *, application_id, rating, created_at):
+    conversation_id = str(uuid4())
+    feedback = ConversationFeedback(
+        id=str(uuid4()),
+        application_id=application_id,
+        conversation_id=conversation_id,
+        rating=rating,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    repository.feedback[conversation_id] = feedback
+    repository.conversation_titles[conversation_id] = "Assistant conversation"
+    return feedback
 
 
 def test_lead_submission_normalizes_and_retries_idempotently():
@@ -221,6 +298,108 @@ def test_conversation_feedback_is_one_rating_per_conversation():
 
     assert first.id == repeated.id
     assert repeated.rating == 5
+
+
+def test_feedback_analytics_are_application_scoped_and_handle_no_responses():
+    repository = _MemoryLeadRepository()
+    service = LeadManagementService(repository)
+    now = datetime.now(timezone.utc)
+    other_application_id = str(uuid4())
+    _record_feedback(repository, application_id=APP_ID, rating=5, created_at=now)
+    _record_feedback(
+        repository,
+        application_id=APP_ID,
+        rating=3,
+        created_at=now - timedelta(days=1),
+    )
+    _record_feedback(
+        repository,
+        application_id=other_application_id,
+        rating=1,
+        created_at=now,
+    )
+
+    analytics = service.feedback_analytics(application_id=APP_ID)
+    assert analytics.response_count == 2
+    assert analytics.average_rating == 4.0
+    assert analytics.five_star_responses == 1
+    assert analytics.positive_rating_percentage == 50.0
+    assert [item.count for item in analytics.distribution] == [0, 0, 1, 0, 1]
+
+    empty = service.feedback_analytics(application_id=str(uuid4()))
+    assert empty.response_count == 0
+    assert empty.average_rating == 0.0
+    assert empty.positive_rating_percentage == 0.0
+    assert [item.count for item in empty.distribution] == [0, 0, 0, 0, 0]
+
+
+def test_feedback_date_and_rating_filters_match_analytics_and_paginated_list():
+    repository = _MemoryLeadRepository()
+    service = LeadManagementService(repository)
+    now = datetime.now(timezone.utc)
+    _record_feedback(repository, application_id=APP_ID, rating=4, created_at=now)
+    _record_feedback(
+        repository,
+        application_id=APP_ID,
+        rating=4,
+        created_at=now - timedelta(hours=1),
+    )
+    _record_feedback(
+        repository,
+        application_id=APP_ID,
+        rating=5,
+        created_at=now - timedelta(days=2),
+    )
+
+    filters = {
+        "application_id": APP_ID,
+        "created_from": now - timedelta(days=1),
+        "rating": 4,
+    }
+    analytics = service.feedback_analytics(**filters)
+    first_page = service.list_feedback(**filters, limit=1, offset=0)
+    second_page = service.list_feedback(**filters, limit=1, offset=1)
+
+    assert analytics.response_count == 2
+    assert analytics.average_rating == 4.0
+    assert len(first_page) == len(second_page) == 1
+    assert first_page[0].feedback.id != second_page[0].feedback.id
+    assert first_page[0].conversation_title == "Assistant conversation"
+
+
+def test_feedback_query_rejects_invalid_date_range_and_rating():
+    service = LeadManagementService(_MemoryLeadRepository())
+    now = datetime.now(timezone.utc)
+
+    with pytest.raises(ApplicationError) as date_error:
+        service.list_feedback(
+            application_id=APP_ID,
+            created_from=now,
+            created_to=now - timedelta(seconds=1),
+        )
+    assert date_error.value.code == "feedback_date_range_invalid"
+
+    with pytest.raises(ApplicationError) as rating_error:
+        service.feedback_analytics(application_id=APP_ID, rating=6)
+    assert rating_error.value.code == "feedback_rating_invalid"
+
+
+def test_feedback_read_routes_are_admin_authenticated_and_read_only():
+    routes = [
+        route
+        for route in api_router.routes
+        if route.path.startswith("/api/admin/feedback/")
+    ]
+
+    assert {route.path for route in routes} == {
+        "/api/admin/feedback/application/{application_id}/analytics",
+        "/api/admin/feedback/application/{application_id}",
+    }
+    for route in routes:
+        assert route.methods == {"GET"}
+        assert require_admin in {
+            dependency.call for dependency in route.dependant.dependencies
+        }
 
 
 @pytest.mark.parametrize(

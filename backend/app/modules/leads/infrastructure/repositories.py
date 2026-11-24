@@ -3,16 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.infrastructure.db.models.conversation_model import ConversationModel
 from app.infrastructure.db.models.lead_model import (
     ConversationFeedbackModel,
     LeadModel,
 )
-from app.modules.leads.domain.entities import ConversationFeedback, Lead
+from app.modules.leads.domain.entities import (
+    ConversationFeedback,
+    ConversationFeedbackEntry,
+    FeedbackAnalytics,
+    FeedbackRatingCount,
+    Lead,
+)
 from app.modules.leads.domain.repository_interfaces import LeadRepositoryInterface
 from app.modules.leads.infrastructure.mappers import (
     map_feedback_model,
@@ -215,6 +222,129 @@ class SqlAlchemyLeadRepository(LeadRepositoryInterface):
             return existing
         self._session.refresh(model)
         return map_feedback_model(model)
+
+    def feedback_analytics_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+    ) -> FeedbackAnalytics:
+        filters = self._feedback_filters(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
+            rating=rating,
+        )
+        totals = self._session.execute(
+            select(
+                func.count(ConversationFeedbackModel.id),
+                func.coalesce(func.avg(ConversationFeedbackModel.rating), 0.0),
+                func.coalesce(
+                    func.sum(case((ConversationFeedbackModel.rating == 5, 1), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((ConversationFeedbackModel.rating >= 4, 1), else_=0)),
+                    0,
+                ),
+            )
+            .select_from(ConversationFeedbackModel)
+            .join(
+                ConversationModel,
+                ConversationModel.id == ConversationFeedbackModel.conversation_id,
+            )
+            .where(*filters)
+        ).one()
+        response_count = int(totals[0])
+        positive_count = int(totals[3])
+        distribution_rows = self._session.execute(
+            select(
+                ConversationFeedbackModel.rating,
+                func.count(ConversationFeedbackModel.id),
+            )
+            .select_from(ConversationFeedbackModel)
+            .join(
+                ConversationModel,
+                ConversationModel.id == ConversationFeedbackModel.conversation_id,
+            )
+            .where(*filters)
+            .group_by(ConversationFeedbackModel.rating)
+        ).all()
+        counts = {int(row[0]): int(row[1]) for row in distribution_rows}
+        return FeedbackAnalytics(
+            response_count=response_count,
+            average_rating=float(totals[1]),
+            five_star_responses=int(totals[2]),
+            positive_rating_percentage=(
+                positive_count * 100.0 / response_count if response_count else 0.0
+            ),
+            distribution=tuple(
+                FeedbackRatingCount(rating=star, count=counts.get(star, 0))
+                for star in range(1, 6)
+            ),
+        )
+
+    def list_feedback_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+        limit: int,
+        offset: int,
+    ) -> list[ConversationFeedbackEntry]:
+        rows = self._session.execute(
+            select(ConversationFeedbackModel, ConversationModel.title)
+            .select_from(ConversationFeedbackModel)
+            .join(
+                ConversationModel,
+                ConversationModel.id == ConversationFeedbackModel.conversation_id,
+            )
+            .where(
+                *self._feedback_filters(
+                    application_id=application_id,
+                    created_from=created_from,
+                    created_to=created_to,
+                    rating=rating,
+                )
+            )
+            .order_by(
+                ConversationFeedbackModel.created_at.desc(),
+                ConversationFeedbackModel.id.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        ).all()
+        return [
+            ConversationFeedbackEntry(
+                feedback=map_feedback_model(model),
+                conversation_title=title,
+            )
+            for model, title in rows
+        ]
+
+    @staticmethod
+    def _feedback_filters(
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+    ) -> list[ColumnElement[bool]]:
+        filters = [
+            ConversationFeedbackModel.application_id == UUID(application_id),
+            ConversationModel.application_id == UUID(application_id),
+        ]
+        if created_from:
+            filters.append(ConversationFeedbackModel.created_at >= created_from)
+        if created_to:
+            filters.append(ConversationFeedbackModel.created_at < created_to)
+        if rating is not None:
+            filters.append(ConversationFeedbackModel.rating == rating)
+        return filters
 
     @staticmethod
     def _filtered_statement(

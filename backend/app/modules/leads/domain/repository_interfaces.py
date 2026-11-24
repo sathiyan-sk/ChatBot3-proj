@@ -3,7 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from app.modules.leads.domain.entities import ConversationFeedback, Lead
+from app.modules.leads.domain.entities import (
+    ConversationFeedback,
+    ConversationFeedbackEntry,
+    FeedbackAnalytics,
+    Lead,
+)
 
 
 class LeadRepositoryInterface(ABC):
@@ -107,4 +112,28 @@ class LeadRepositoryInterface(ABC):
         conversation_id: str,
         rating: int,
     ) -> ConversationFeedback:
+        raise NotImplementedError
+
+    @abstractmethod
+    def feedback_analytics_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+    ) -> FeedbackAnalytics:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_feedback_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+        limit: int,
+        offset: int,
+    ) -> list[ConversationFeedbackEntry]:
         raise NotImplementedError

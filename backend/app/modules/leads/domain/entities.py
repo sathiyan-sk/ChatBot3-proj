@@ -32,3 +32,24 @@ class ConversationFeedback:
     rating: int
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class ConversationFeedbackEntry:
+    feedback: ConversationFeedback
+    conversation_title: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FeedbackRatingCount:
+    rating: int
+    count: int
+
+
+@dataclass(slots=True, frozen=True)
+class FeedbackAnalytics:
+    response_count: int
+    average_rating: float
+    five_star_responses: int
+    positive_rating_percentage: float
+    distribution: tuple[FeedbackRatingCount, ...]

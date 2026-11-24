@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/api/client";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/Stats";
    Rebuilt on the shared card, badge and button primitives.
    ============================================================ */
 
-export default function ConversationsTab({ applicationId }) {
+export default function ConversationsTab({ applicationId, initialConversationId }) {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [conversationMessages, setConversationMessages] = useState([]);
@@ -52,7 +52,7 @@ export default function ConversationsTab({ applicationId }) {
     };
   }, [applicationId]);
 
-  const openConversation = async (convId) => {
+  const openConversation = useCallback(async (convId) => {
     setIsDetailLoading(true);
     try {
       const res = await apiClient.get(`/admin/conversations/${convId}`);
@@ -64,7 +64,30 @@ export default function ConversationsTab({ applicationId }) {
     } finally {
       setIsDetailLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!initialConversationId) return undefined;
+    let cancelled = false;
+    const fetchConversation = async () => {
+      setIsDetailLoading(true);
+      try {
+        const res = await apiClient.get(`/admin/conversations/${initialConversationId}`);
+        if (cancelled) return;
+        setSelectedConversation(res.data.conversation);
+        setConversationMessages(res.data.messages || []);
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) toast.error("Failed to load conversation detail.");
+      } finally {
+        if (!cancelled) setIsDetailLoading(false);
+      }
+    };
+    fetchConversation();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialConversationId]);
 
   const closeConversation = async (convId) => {
     try {

@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from app.core.exceptions import ApplicationError
-from app.modules.leads.domain.entities import ConversationFeedback, Lead
+from app.modules.leads.domain.entities import (
+    ConversationFeedback,
+    ConversationFeedbackEntry,
+    FeedbackAnalytics,
+    Lead,
+)
 from app.modules.leads.domain.policies import (
     LEAD_CONSENT_TEXT,
     LEAD_CONSENT_TEXT_VERSION,
@@ -149,6 +154,56 @@ class LeadManagementService:
             rating=rating,
         )
 
+    def feedback_analytics(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        rating: int | None = None,
+    ) -> FeedbackAnalytics:
+        application_id, created_from, created_to = self._validate_feedback_query(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
+            rating=rating,
+            limit=1,
+            offset=0,
+        )
+        return self.repository.feedback_analytics_for_application(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
+            rating=rating,
+        )
+
+    def list_feedback(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        rating: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ConversationFeedbackEntry]:
+        application_id, created_from, created_to = self._validate_feedback_query(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
+            rating=rating,
+            limit=limit,
+            offset=offset,
+        )
+        return self.repository.list_feedback_for_application(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
+            rating=rating,
+            limit=limit,
+            offset=offset,
+        )
+
     def list_leads(
         self,
         *,
@@ -274,6 +329,50 @@ class LeadManagementService:
                 code=f"{label}_identifier_invalid",
                 status_code=422,
             ) from exc
+
+    @staticmethod
+    def _validate_feedback_query(
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        rating: int | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[str, datetime | None, datetime | None]:
+        normalized_application_id = LeadManagementService._normalize_uuid(
+            application_id,
+            "application",
+        )
+        normalized_from = LeadManagementService._normalize_datetime(created_from)
+        normalized_to = LeadManagementService._normalize_datetime(created_to)
+        if normalized_from and normalized_to and normalized_from >= normalized_to:
+            raise ApplicationError(
+                message="Date range start must be before end.",
+                code="feedback_date_range_invalid",
+                status_code=422,
+            )
+        if rating is not None and not 1 <= rating <= 5:
+            raise ApplicationError(
+                message="Rating filter must be between 1 and 5.",
+                code="feedback_rating_invalid",
+                status_code=422,
+            )
+        if not 1 <= limit <= 500 or offset < 0:
+            raise ApplicationError(
+                message="Feedback page size or offset is invalid.",
+                code="feedback_pagination_invalid",
+                status_code=422,
+            )
+        return normalized_application_id, normalized_from, normalized_to
+
+    @staticmethod
+    def _normalize_datetime(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     @staticmethod
     def _matches_submission(lead: Lead, values: dict[str, object]) -> bool:

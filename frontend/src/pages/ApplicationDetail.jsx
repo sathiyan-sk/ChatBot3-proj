@@ -5,10 +5,11 @@ import {
   ArrowLeft, Database, MessageSquare, Settings, Play,
   Trash2, Copy, Check, UploadCloud, FileText,
   Sparkles, Sliders, Globe, Eye, Terminal, RefreshCw,
-  Plus, RotateCcw, XCircle, KeyRound, Pencil, Power, Users,
+  Plus, RotateCcw, XCircle, KeyRound, Pencil, Power, Users, Star,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConversationsTab from "@/components/ConversationsTab";
+import FeedbackTab from "@/components/FeedbackTab";
 import LeadsTab from "@/components/LeadsTab";
 
 import { Button, Badge, Card, Spinner, ErrorBanner } from "@/components/ui/Primitives";
@@ -30,8 +31,8 @@ const DEFAULT_STARTER_PROMPTS = [
 
 /* ============================================================
    APPLICATION DETAIL
-   Seven-tab workspace: General, Knowledge Base, Widget Config,
-   Chat Sandbox, Conversations, Leads, Settings. Rebuilt on the shared
+   Eight-tab workspace: General, Knowledge Base, Widget Config,
+   Chat Sandbox, Conversations, Leads, Feedback, Settings. Rebuilt on the shared
    UI kit (cards, tabs, form controls, confirm dialog) while
    keeping every backend interaction and data-testid intact.
    ============================================================ */
@@ -43,6 +44,7 @@ const TAB_ITEMS = [
   { key: "chat", label: "Chat Testing", icon: MessageSquare, testId: "tab-chat" },
   { key: "conversations", label: "Conversations", icon: MessageSquare, testId: "tab-conversations" },
   { key: "leads", label: "Leads", icon: Users, testId: "tab-leads" },
+  { key: "feedback", label: "Feedback", icon: Star, testId: "tab-feedback" },
   { key: "settings", label: "Settings", icon: Settings, testId: "tab-settings" },
 ];
 
@@ -103,6 +105,7 @@ export default function ApplicationDetail() {
   const { id } = useParams();
   const [app, setApp] = useState(null);
   const [activeTab, setActiveTab] = useState("general");
+  const [conversationToOpen, setConversationToOpen] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -1697,8 +1700,22 @@ export default function ApplicationDetail() {
         )}
 
         {/* ======================= TAB: CONVERSATIONS ======================= */}
-        {activeTab === "conversations" && <ConversationsTab applicationId={id} />}
+        {activeTab === "conversations" && (
+          <ConversationsTab
+            applicationId={id}
+            initialConversationId={conversationToOpen}
+          />
+        )}
         {activeTab === "leads" && <LeadsTab applicationId={id} />}
+        {activeTab === "feedback" && (
+          <FeedbackTab
+            applicationId={id}
+            onViewConversation={(conversationId) => {
+              setConversationToOpen(conversationId);
+              setActiveTab("conversations");
+            }}
+          />
+        )}
 
         {/* ======================= TAB: SETTINGS ======================= */}
         {activeTab === "settings" && (
