@@ -477,6 +477,7 @@
     hideStarterPrompts();
     addMessage(query, "user");
     textInput.value = "";
+    const previousConversationId = conversationId;
 
     // Show searching bubble
     const thinkingRow = document.createElement("div");
@@ -516,6 +517,15 @@
 
       if (response.ok) {
         const data = await response.json();
+
+        if (
+          previousConversationId
+          && data.conversation_id
+          && data.conversation_id !== previousConversationId
+        ) {
+          messagesBox.replaceChildren();
+          addMessage(query, "user");
+        }
 
         // Store conversation ID for subsequent messages
         if (data.conversation_id) {

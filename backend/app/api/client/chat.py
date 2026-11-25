@@ -64,6 +64,10 @@ def create_customer_preview_message(
                 conversation_title=request.conversation_title,
                 top_k=request.top_k,
                 request_id=getattr(http_request.state, "request_id", None),
+                persist_conversation=False,
+                conversation_messages=[
+                    item.model_dump() for item in request.conversation_messages
+                ],
             )
         )
         citations = [

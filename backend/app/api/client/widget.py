@@ -28,7 +28,6 @@ from app.modules.leads.domain.policies import (
 from app.modules.conversations.application.commands import ResolveConversationCommand
 from app.modules.conversations.application.queries import (
     GetConversationDetailQuery,
-    ListIdentityConversationsQuery,
 )
 from app.modules.conversations.application.services import (
     ConversationApplicationService,
@@ -113,28 +112,20 @@ def start_widget_session(
         )
     )
 
-    visitor_conversations = conversation_service.list_identity_conversations(
-        ListIdentityConversationsQuery(
+    detail = conversation_service.get_conversation_detail(
+        GetConversationDetailQuery(
+            conversation_id=active_conversation.id,
             application_id=application_id,
-            conversation_identity=payload.conversation_identity,
         )
     )
-    history: list[WidgetSessionMessage] = []
-    for conversation in reversed(visitor_conversations):
-        detail = conversation_service.get_conversation_detail(
-            GetConversationDetailQuery(
-                conversation_id=conversation.id,
-                application_id=application_id,
-            )
+    history = [
+        WidgetSessionMessage(
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at,
         )
-        history.extend(
-            WidgetSessionMessage(
-                role=message.role,
-                content=message.content,
-                created_at=message.created_at,
-            )
-            for message in detail.messages
-        )
+        for message in detail.messages
+    ]
 
     return WidgetSessionResponse(
         conversation_id=str(active_conversation.id),

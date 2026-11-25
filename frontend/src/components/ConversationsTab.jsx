@@ -12,7 +12,11 @@ import { EmptyState } from "@/components/ui/Stats";
    Rebuilt on the shared card, badge and button primitives.
    ============================================================ */
 
-export default function ConversationsTab({ applicationId, initialConversationId }) {
+export default function ConversationsTab({
+  applicationId,
+  initialConversationId,
+  onConversationClosed,
+}) {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [conversationMessages, setConversationMessages] = useState([]);
@@ -92,6 +96,9 @@ export default function ConversationsTab({ applicationId, initialConversationId 
   const closeConversation = async (convId) => {
     try {
       await apiClient.delete(`/admin/conversations/${convId}`);
+      if (selectedConversation?.id === convId) {
+        onConversationClosed?.(selectedConversation);
+      }
       toast.success("Conversation closed.");
       setSelectedConversation(null);
       setConversationMessages([]);

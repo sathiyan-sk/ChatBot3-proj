@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from collections.abc import Callable
+from uuid import uuid4
 
 from app.core.exceptions import ApplicationError
 from app.knowledge_engine.pipelines.question_answering_pipeline import (
@@ -93,26 +94,39 @@ class ChatApplicationService:
                     status_code=409,
                 )
 
-        conversation = self.conversation_service.resolve_conversation(
-            ResolveConversationCommand(
-                application_id=command.application_id,
-                conversation_identity=command.conversation_identity,
-                title=command.conversation_title,
-                inactivity_timeout_minutes=(
-                    application_settings.inactivity_timeout_minutes
-                    if application_settings is not None
-                    else 30
-                ),
+        conversation_id = str(uuid4())
+        conversation_messages = list(command.conversation_messages)
+        user_message_id = ""
+        if command.persist_conversation:
+            conversation = self.conversation_service.resolve_conversation(
+                ResolveConversationCommand(
+                    application_id=command.application_id,
+                    conversation_identity=command.conversation_identity,
+                    title=command.conversation_title,
+                    inactivity_timeout_minutes=(
+                        None
+                        if command.preserve_conversation
+                        else (
+                            application_settings.inactivity_timeout_minutes
+                            if application_settings is not None
+                            else 30
+                        )
+                    ),
+                )
             )
-        )
-
-        user_message = self.conversation_service.append_message(
-            AppendMessageCommand(
-                conversation_id=conversation.id,
-                role="user",
-                content=message_text,
+            conversation_id = str(conversation.id)
+            user_message = self.conversation_service.append_message(
+                AppendMessageCommand(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=message_text,
+                )
             )
-        )
+            user_message_id = str(user_message.id)
+        else:
+            conversation_messages.append(
+                {"role": "user", "content": message_text}
+            )
 
         if contact_intent:
             answer_text = (
@@ -120,17 +134,20 @@ class ChatApplicationService:
                 "Use the contact form below to share your details and confirm "
                 "that you agree to be contacted."
             )
-            assistant_message = self.conversation_service.append_message(
-                AppendMessageCommand(
-                    conversation_id=conversation.id,
-                    role="assistant",
-                    content=answer_text,
+            assistant_message_id = ""
+            if command.persist_conversation:
+                assistant_message = self.conversation_service.append_message(
+                    AppendMessageCommand(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=answer_text,
+                    )
                 )
-            )
+                assistant_message_id = str(assistant_message.id)
             return AskChatQuestionResultDto(
-                conversation_id=str(conversation.id),
-                user_message_id=str(user_message.id),
-                assistant_message_id=str(assistant_message.id),
+                conversation_id=conversation_id if command.persist_conversation else "",
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_message_id,
                 answer_text=answer_text,
                 citations=[],
                 actions=[
@@ -143,16 +160,17 @@ class ChatApplicationService:
                 ],
             )
 
-        conversation_detail = self.conversation_service.get_conversation_detail(
-            GetConversationDetailQuery(
-                conversation_id=str(
-                    conversation.id,
-                ),
-                application_id=str(
-                    command.application_id,
-                ),
+        if command.persist_conversation:
+            conversation_detail = self.conversation_service.get_conversation_detail(
+                GetConversationDetailQuery(
+                    conversation_id=conversation_id,
+                    application_id=command.application_id,
+                )
             )
-        )
+            conversation_messages = [
+                {"role": item.role, "content": item.content}
+                for item in conversation_detail.messages
+            ]
 
         question_answering_pipeline = self.question_answering_pipeline_factory(
             application_settings
@@ -162,11 +180,8 @@ class ChatApplicationService:
                 application_id=command.application_id,
                 knowledge_base_id=knowledge_base.id,
                 query_text=message_text,
-                conversation_id=conversation.id,
-                messages=[
-                    {"role": item.role, "content": item.content}
-                    for item in conversation_detail.messages
-                ],
+                conversation_id=conversation_id,
+                messages=conversation_messages,
                 top_k=command.top_k,
                 max_context_messages=(
                     application_settings.max_context_messages
@@ -187,33 +202,36 @@ class ChatApplicationService:
             )
         )
 
-        assistant_message = self.conversation_service.append_message(
-            AppendMessageCommand(
-                conversation_id=conversation.id,
-                role="assistant",
-                content=pipeline_result.answer_text,
-                citation_payload=json.dumps(
-                    [
-                        {
-                            "document_id": str(item.document_id),
-                            "document_title": str(item.document_title),
-                            "chunk_id": str(item.chunk_id),
-                            "source_uri": (
-                                str(item.source_uri)
-                                if item.source_uri is not None
-                                else None
-                            ),
-                        }
-                        for item in pipeline_result.citations
-                    ]
-                ),
+        assistant_message_id = ""
+        if command.persist_conversation:
+            assistant_message = self.conversation_service.append_message(
+                AppendMessageCommand(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=pipeline_result.answer_text,
+                    citation_payload=json.dumps(
+                        [
+                            {
+                                "document_id": str(item.document_id),
+                                "document_title": str(item.document_title),
+                                "chunk_id": str(item.chunk_id),
+                                "source_uri": (
+                                    str(item.source_uri)
+                                    if item.source_uri is not None
+                                    else None
+                                ),
+                            }
+                            for item in pipeline_result.citations
+                        ]
+                    ),
+                )
             )
-        )
+            assistant_message_id = str(assistant_message.id)
 
         return AskChatQuestionResultDto(
-            conversation_id=str(conversation.id),
-            user_message_id=str(user_message.id),
-            assistant_message_id=str(assistant_message.id),
+            conversation_id=conversation_id if command.persist_conversation else "",
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id,
             answer_text=pipeline_result.answer_text,
             citations=[
                 CitationItem(

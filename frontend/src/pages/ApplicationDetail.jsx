@@ -65,6 +65,22 @@ const providerLabel = (provider) =>
     openai: "OpenAI",
   })[provider] || provider;
 
+function parseSandboxSources(citationPayload) {
+  if (!citationPayload) return [];
+  try {
+    const citations = JSON.parse(citationPayload);
+    if (!Array.isArray(citations)) return [];
+    return citations.map((citation) => ({
+      document_id: citation.document_id,
+      title: citation.document_title || citation.title,
+      chunk_id: citation.chunk_id,
+      source_uri: citation.source_uri || null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // Preview theme tokens mirroring the real widget.css CSS variables so the
 // Live Preview reflects the ACTUAL light/dark appearance (panel background,
 // bubbles, input, footer and launcher), not just the header colour.
@@ -135,18 +151,76 @@ export default function ApplicationDetail() {
   const [sandboxQuestion, setSandboxQuestion] = useState("");
   const [sandboxHistory, setSandboxHistory] = useState([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [sandboxLoadedApplicationId, setSandboxLoadedApplicationId] = useState(null);
+  const isSandboxHistoryLoading = sandboxLoadedApplicationId !== id;
   const [chatTopK, setChatTopK] = useState(4);
   const [sandboxConversationId, setSandboxConversationId] = useState(null);
-  const [sandboxApiKey, setSandboxApiKey] = useState(
-    () => {
-      try {
-        return JSON.parse(localStorage.getItem("oceanrag_sandbox_api_keys") || "{}")[id] || "";
-      } catch {
-        return "";
-      }
+  const [sandboxApiKeys, setSandboxApiKeys] = useState(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("oceanrag_sandbox_api_keys") || "{}"
+      );
+      return saved && typeof saved === "object" ? saved : {};
+    } catch {
+      return {};
     }
-  );
+  });
+  const sandboxApiKey = sandboxApiKeys[id] || "";
   const [showSandboxKeyInput, setShowSandboxKeyInput] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSandboxConversation = async () => {
+      try {
+        const { data: conversations } = await apiClient.get(
+          `/admin/conversations/application/${id}`
+        );
+        const activeConversation = conversations.find(
+          (conversation) =>
+            conversation.is_active
+            && conversation.conversation_identity === `sandbox-${id}`
+        );
+        if (!activeConversation) {
+          if (!cancelled) {
+            setSandboxHistory([]);
+            setSandboxConversationId(null);
+            setSandboxLoadedApplicationId(id);
+          }
+          return;
+        }
+
+        const { data: detail } = await apiClient.get(
+          `/admin/conversations/${activeConversation.id}`
+        );
+        if (cancelled) return;
+
+        setSandboxConversationId(activeConversation.id);
+        setSandboxHistory(
+          (detail.messages || []).map((message) => ({
+            role: message.role === "assistant" ? "bot" : message.role,
+            content: message.content,
+            timestamp: message.created_at,
+            sources: parseSandboxSources(message.citation_payload),
+          }))
+        );
+        setSandboxLoadedApplicationId(id);
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          setSandboxHistory([]);
+          setSandboxConversationId(null);
+          setSandboxLoadedApplicationId(id);
+          toast.error("Failed to restore the application sandbox conversation.");
+        }
+      }
+    };
+
+    restoreSandboxConversation();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Widget appearance configurations
   const [greetingMsg, setGreetingMsg] = useState("");
@@ -711,26 +785,30 @@ export default function ApplicationDetail() {
   // Sandbox Chat testing
   const handleChatTest = async (e) => {
     e.preventDefault();
-    if (!sandboxQuestion.trim() || isChatLoading || !app) return;
+    if (
+      !sandboxQuestion.trim()
+      || isChatLoading
+      || isSandboxHistoryLoading
+      || !app
+    ) return;
 
     const userMsg = {
       role: "user",
       content: sandboxQuestion,
       timestamp: new Date().toISOString(),
     };
+    const previousConversationId = sandboxConversationId;
     setSandboxHistory((prev) => [...prev, userMsg]);
     setSandboxQuestion("");
     setIsChatLoading(true);
 
     try {
       const response = await apiClient.post(
-        "/client/chat/messages",
+        `/admin/conversations/application/${id}/sandbox/messages`,
         {
           conversation_identity: `sandbox-${id}`,
           message: userMsg.content,
-          conversation_title: "Admin Sandbox Test",
           top_k: chatTopK,
-          conversation_id: sandboxConversationId,
           application_id: id,
         },
         {
@@ -749,7 +827,13 @@ export default function ApplicationDetail() {
         sources: data.citations || [],
         conversation_id: data.conversation_id,
       };
-      setSandboxHistory((prev) => [...prev, botMsg]);
+      setSandboxHistory((prev) => [
+        ...(previousConversationId
+          && data.conversation_id !== previousConversationId
+          ? [userMsg]
+          : prev),
+        botMsg,
+      ]);
     } catch (e) {
       console.error(e);
       const detail =
@@ -1539,11 +1623,19 @@ export default function ApplicationDetail() {
                 <Terminal className="h-4 w-4 text-[#00D4FF]" aria-hidden="true" />
                 <span className="font-semibold text-slate-200">Application Chat Sandbox</span>
                 <span className="text-slate-600">•</span>
-                <span className="text-slate-400 font-mono text-[11px]">POST /api/client/chat/messages</span>
+                <span className="text-slate-400 font-mono text-[11px]">
+                  POST /api/admin/conversations/application/{id}/sandbox/messages
+                </span>
                 <Badge variant="neutral" className="ml-1">
                   {app.name}
                 </Badge>
               </div>
+
+              <p className="w-full text-[10px] text-slate-500">
+                This application-scoped test conversation restores after refresh
+                and stays active until closed. Inactivity timeout applies to visitor
+                chats; retention still applies to stored conversations.
+              </p>
 
               <div className="flex flex-wrap items-center gap-3">
                 {/* API Key input for sandbox */}
@@ -1564,7 +1656,10 @@ export default function ApplicationDetail() {
                       value={sandboxApiKey}
                       onChange={(e) => {
                         const value = e.target.value;
-                        setSandboxApiKey(value);
+                        setSandboxApiKeys((current) => ({
+                          ...current,
+                          [id]: value,
+                        }));
                         try {
                           const savedKeys = JSON.parse(
                             localStorage.getItem("oceanrag_sandbox_api_keys") || "{}"
@@ -1605,10 +1700,22 @@ export default function ApplicationDetail() {
                 <Button
                   variant="danger"
                   size="sm"
-                  onClick={() => {
+                  disabled={isSandboxHistoryLoading || isChatLoading}
+                  onClick={async () => {
+                    if (sandboxConversationId) {
+                      try {
+                        await apiClient.delete(
+                          `/admin/conversations/${sandboxConversationId}`
+                        );
+                      } catch (error) {
+                        console.error(error);
+                        toast.error("Failed to close the sandbox conversation.");
+                        return;
+                      }
+                    }
                     setSandboxHistory([]);
                     setSandboxConversationId(null);
-                    toast.success("Sandbox history reset.");
+                    toast.success("Sandbox conversation closed.");
                   }}
                   data-testid="chat-sandbox-clear"
                 >
@@ -1620,7 +1727,11 @@ export default function ApplicationDetail() {
             {/* Simulated Chat Interface */}
             <Card className="h-[450px] flex flex-col justify-between overflow-hidden p-0">
               <div className="flex-1 p-5 overflow-y-auto space-y-4">
-                {sandboxHistory.length === 0 ? (
+                {isSandboxHistoryLoading ? (
+                  <div className="flex h-full items-center justify-center">
+                    <Spinner className="h-6 w-6" />
+                  </div>
+                ) : sandboxHistory.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center py-10">
                     <div className="h-10 w-10 rounded-full bg-white/[0.05] border border-white/[0.10] flex items-center justify-center text-slate-500 mb-3 animate-pulse">
                       ⚡
@@ -1710,13 +1821,14 @@ export default function ApplicationDetail() {
                   value={sandboxQuestion}
                   onChange={(e) => setSandboxQuestion(e.target.value)}
                   placeholder="Ask testing questions about indexed documents..."
+                  disabled={isSandboxHistoryLoading || isChatLoading}
                   className="flex-1 bg-[#040914]/50 border border-white/[0.10] focus:border-[#00D4FF] text-white text-[12px] rounded-control px-4 py-3 outline-none focus:ring-1 focus:ring-[#00D4FF] transition"
                   data-testid="chat-sandbox-input"
                   required
                 />
                 <Button
                   type="submit"
-                  disabled={isChatLoading || !sandboxQuestion.trim()}
+                  disabled={isSandboxHistoryLoading || isChatLoading || !sandboxQuestion.trim()}
                   className="h-11 px-5"
                   data-testid="chat-sandbox-submit"
                 >
@@ -1733,6 +1845,12 @@ export default function ApplicationDetail() {
           <ConversationsTab
             applicationId={id}
             initialConversationId={conversationToOpen}
+            onConversationClosed={(conversation) => {
+              if (conversation.id === sandboxConversationId) {
+                setSandboxHistory([]);
+                setSandboxConversationId(null);
+              }
+            }}
           />
         )}
         {activeTab === "leads" && <LeadsTab applicationId={id} />}
@@ -1991,6 +2109,11 @@ export default function ApplicationDetail() {
                     min="1"
                     max="10080"
                   />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Closes idle visitor/widget conversations on their next
+                    session or message. Admin sandbox conversations stay active
+                    until closed.
+                  </p>
                 </Field>
 
                 <Field label="Retention Days" htmlFor="settings-retention">
@@ -2004,6 +2127,10 @@ export default function ApplicationDetail() {
                     min="1"
                     max="3650"
                   />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Deletes application conversations and messages after this
+                    many inactive days. Cleanup runs hourly.
+                  </p>
                 </Field>
               </div>
 

@@ -9,10 +9,13 @@ import pytest
 
 from app.core.exceptions import ApplicationError
 from fastapi import HTTPException
+from app.api.admin.conversations import create_application_sandbox_message
 from app.api.client.chat import create_chat_message
 from app.api.client.chat import create_customer_preview_message
+from app.api.client.widget import start_widget_session
 from app.api.dependencies import require_admin
 from app.api.router import api_router
+from app.api.schemas.chat import ChatHistoryMessageRequest
 from app.api.admin.leads import _csv_cell
 from app.modules.leads.application.services import LeadManagementService
 from app.modules.leads.domain.entities import (
@@ -28,6 +31,9 @@ from app.modules.leads.domain.policies import (
 )
 from app.modules.question_answering.application.commands import AskChatQuestionCommand
 from app.modules.question_answering.application.services import ChatApplicationService
+from app.modules.conversations.infrastructure.repositories import (
+    SqlAlchemyConversationRepository,
+)
 
 
 class _MemoryLeadRepository:
@@ -456,6 +462,264 @@ def test_customer_preview_without_key_uses_platform_generation():
     assert response.actions == []
 
 
+def test_keyed_customer_preview_does_not_persist_conversation():
+    history = [
+        SimpleNamespace(role="user", content="Earlier question"),
+        SimpleNamespace(role="assistant", content="Earlier answer"),
+    ]
+    captured = {}
+
+    class _Service:
+        def ask(self, command):
+            captured["command"] = command
+            return SimpleNamespace(
+                conversation_id="",
+                answer_text="Preview answer",
+                citations=[],
+                actions=[],
+            )
+
+    response = create_customer_preview_message(
+        request=SimpleNamespace(
+            conversation_identity="customer-preview",
+            conversation_title="Customer Preview",
+            message="Follow-up",
+            top_k=5,
+            conversation_messages=[
+                ChatHistoryMessageRequest(
+                    role=item.role,
+                    content=item.content,
+                )
+                for item in history
+            ],
+        ),
+        http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
+        application_context=SimpleNamespace(application_id=APP_ID),
+        service=_Service(),
+        platform_llm_provider=SimpleNamespace(),
+    )
+
+    command = captured["command"]
+    assert command.persist_conversation is False
+    assert command.conversation_messages == [
+        {"role": "user", "content": "Earlier question"},
+        {"role": "assistant", "content": "Earlier answer"},
+    ]
+    assert response.conversation_id == ""
+    assert response.answer == "Preview answer"
+
+
+def test_nonpersistent_application_preview_passes_in_memory_history_to_rag():
+    captured = {}
+
+    class _Pipeline:
+        def run(self, request):
+            captured["pipeline_request"] = request
+            return SimpleNamespace(answer_text="RAG preview answer", citations=[])
+
+    service = ChatApplicationService(
+        knowledge_base_repository=SimpleNamespace(
+            get_by_application_id=lambda _application_id: SimpleNamespace(id="kb-id")
+        ),
+        document_repository=SimpleNamespace(
+            list_by_knowledge_base_id=lambda **_kwargs: [
+                SimpleNamespace(ready_version=1, status="ready")
+            ]
+        ),
+        settings_repository=SimpleNamespace(
+            get_by_application_id=lambda _application_id: SimpleNamespace(
+                inactivity_timeout_minutes=30,
+                max_context_messages=8,
+                llm_temperature="0.2",
+                prompt_system_template=None,
+            )
+        ),
+        conversation_service=SimpleNamespace(
+            resolve_conversation=lambda _command: pytest.fail(
+                "global customer preview must not persist a conversation"
+            )
+        ),
+        question_answering_pipeline_factory=lambda _settings: _Pipeline(),
+    )
+
+    result = service.ask(
+        AskChatQuestionCommand(
+            application_id=APP_ID,
+            conversation_identity="customer-preview",
+            message_text="Follow-up",
+            persist_conversation=False,
+            conversation_messages=[
+                {"role": "user", "content": "Earlier question"},
+                {"role": "assistant", "content": "Earlier answer"},
+            ],
+        )
+    )
+
+    assert result.conversation_id == ""
+    assert result.answer_text == "RAG preview answer"
+    assert captured["pipeline_request"].messages == [
+        {"role": "user", "content": "Earlier question"},
+        {"role": "assistant", "content": "Earlier answer"},
+        {"role": "user", "content": "Follow-up"},
+    ]
+
+
+def test_application_sandbox_route_preserves_one_conversation_until_closed():
+    captured = {}
+
+    class _Service:
+        def ask(self, command):
+            captured["command"] = command
+            return SimpleNamespace(
+                conversation_id=CONVERSATION_ID,
+                answer_text="Sandbox answer",
+                citations=[],
+                actions=[],
+            )
+
+    response = create_application_sandbox_message(
+        application_id=APP_ID,
+        request=SimpleNamespace(
+            application_id=APP_ID,
+            message="Test question",
+            top_k=4,
+        ),
+        http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
+        application_context=SimpleNamespace(application_id=APP_ID),
+        service=_Service(),
+    )
+
+    assert captured["command"].conversation_identity == f"sandbox-{APP_ID}"
+    assert captured["command"].preserve_conversation is True
+    assert response.conversation_id == CONVERSATION_ID
+
+
+def test_application_sandbox_route_rejects_a_mismatched_api_key():
+    class _Service:
+        def ask(self, _command):
+            pytest.fail("mismatched application/key must fail before RAG")
+
+    with pytest.raises(HTTPException) as error:
+        create_application_sandbox_message(
+            application_id=APP_ID,
+            request=SimpleNamespace(
+                application_id=APP_ID,
+                message="Test question",
+                top_k=4,
+            ),
+            http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
+            application_context=SimpleNamespace(application_id=str(uuid4())),
+            service=_Service(),
+        )
+
+    assert error.value.status_code == 403
+    assert error.value.detail["code"] == "chat_application_key_mismatch"
+
+
+def test_application_sandbox_route_is_admin_authenticated():
+    route = next(
+        route
+        for route in api_router.routes
+        if route.path
+        == "/api/admin/conversations/application/{application_id}/sandbox/messages"
+    )
+
+    assert route.methods == {"POST"}
+    assert require_admin in {
+        dependency.call for dependency in route.dependant.dependencies
+    }
+
+
+def test_widget_session_uses_application_timeout_and_restores_active_history():
+    conversation = SimpleNamespace(id=CONVERSATION_ID)
+    message = SimpleNamespace(
+        role="assistant",
+        content="Restored answer",
+        created_at=datetime.now(timezone.utc),
+    )
+    captured = {}
+
+    class _ConversationService:
+        def cleanup_expired_conversations(self, **kwargs):
+            captured["cleanup"] = kwargs
+
+        def resolve_conversation(self, command):
+            captured["resolve"] = command
+            return conversation
+
+        def get_conversation_detail(self, query):
+            captured["detail"] = query
+            return SimpleNamespace(messages=[message])
+
+    class _SettingsRepository:
+        def get_by_application_id(self, application_id):
+            captured["settings_application_id"] = application_id
+            return SimpleNamespace(inactivity_timeout_minutes=9)
+
+    result = start_widget_session(
+        payload=SimpleNamespace(conversation_identity="visitor-123"),
+        request=SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    settings=SimpleNamespace(chat_history_retention_days=30)
+                )
+            )
+        ),
+        response=SimpleNamespace(headers={}),
+        application_id=APP_ID,
+        conversation_service=_ConversationService(),
+        settings_service=SimpleNamespace(
+            settings_repository=_SettingsRepository()
+        ),
+    )
+
+    assert captured["settings_application_id"] == APP_ID
+    assert captured["resolve"].inactivity_timeout_minutes == 9
+    assert captured["cleanup"]["application_id"] == APP_ID
+    assert captured["detail"].conversation_id == CONVERSATION_ID
+    assert [item.content for item in result.messages] == ["Restored answer"]
+
+
+def test_conversation_retention_uses_each_applications_configured_days():
+    first_application_id = str(uuid4())
+    second_application_id = str(uuid4())
+    retention_rows = [
+        (first_application_id, 2),
+        (second_application_id, None),
+    ]
+
+    class _Session:
+        def __init__(self):
+            self.call_count = 0
+            self.delete_statements = []
+
+        def execute(self, statement):
+            self.call_count += 1
+            if self.call_count == 1:
+                return SimpleNamespace(all=lambda: retention_rows)
+            self.delete_statements.append(statement)
+            return SimpleNamespace(rowcount=1)
+
+    session = _Session()
+    deleted_count = SqlAlchemyConversationRepository(
+        session
+    ).delete_expired_conversations(
+        default_retention_days=10,
+    )
+
+    assert deleted_count == 2
+    assert len(session.delete_statements) == 2
+    cutoffs = [
+        next(
+            value
+            for value in statement.compile().params.values()
+            if isinstance(value, datetime)
+        )
+        for statement in session.delete_statements
+    ]
+    assert abs(abs((cutoffs[1] - cutoffs[0]).total_seconds()) - 8 * 86400) < 2
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -483,9 +747,11 @@ def test_csv_cells_neutralize_spreadsheet_formulas(value):
 def test_contact_intent_returns_structured_action_without_calling_rag():
     conversation = SimpleNamespace(id=CONVERSATION_ID)
     messages = []
+    resolved_commands = []
 
     class _ConversationService:
-        def resolve_conversation(self, _command):
+        def resolve_conversation(self, command):
+            resolved_commands.append(command)
             return conversation
 
         def append_message(self, command):
@@ -495,7 +761,7 @@ def test_contact_intent_returns_structured_action_without_calling_rag():
 
     class _SettingsRepository:
         def get_by_application_id(self, _application_id):
-            return None
+            return SimpleNamespace(inactivity_timeout_minutes=9)
 
     service = ChatApplicationService(
         knowledge_base_repository=SimpleNamespace(
@@ -516,10 +782,12 @@ def test_contact_intent_returns_structured_action_without_calling_rag():
             application_id=APP_ID,
             conversation_identity="visitor-123",
             message_text="Can someone contact me about pricing?",
+            preserve_conversation=True,
         )
     )
 
     assert result.conversation_id == CONVERSATION_ID
+    assert resolved_commands[0].inactivity_timeout_minutes is None
     assert result.citations == []
     assert result.actions[0].type == "contact_enquiry"
     assert [item[0].role for item in messages] == ["user", "assistant"]

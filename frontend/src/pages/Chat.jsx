@@ -8,7 +8,6 @@ import { Badge, Button, Card } from "@/components/ui/Primitives";
 import { Input } from "@/components/ui/Form";
 
 const API_KEY_STORAGE = "oceanrag_chat_api_key";
-const HISTORY_KEY_PREFIX = "oceanrag_chat_history";
 
 function stripCitationMarkers(text) {
   return String(text || "").replace(/\s*\[\d+\]/g, "");
@@ -23,49 +22,13 @@ export default function Chat() {
   );
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [resolvedApplicationId, setResolvedApplicationId] = useState("");
-  const [conversationId, setConversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    if (!resolvedApplicationId) return;
-    queueMicrotask(() => {
-      const saved = localStorage.getItem(
-        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`
-      );
-      if (!saved) {
-        setMessages([
-          {
-            id: "welcome",
-            role: "bot",
-            content: "Hello. What would you like to know?",
-            timestamp: new Date().toISOString(),
-          },
-        ]);
-        setConversationId(null);
-        return;
-      }
-      try {
-        const parsed = JSON.parse(saved);
-        setMessages(parsed.messages || []);
-        setConversationId(parsed.conversationId || null);
-      } catch {
-        setMessages([]);
-        setConversationId(null);
-      }
-    });
-  }, [resolvedApplicationId]);
-
-  useEffect(() => {
-    if (!resolvedApplicationId) return;
-    if (messages.length > 0) {
-      localStorage.setItem(
-        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`,
-        JSON.stringify({ messages, conversationId })
-      );
-    } else {
-      localStorage.removeItem(`${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`);
-    }
-  }, [messages, conversationId, resolvedApplicationId]);
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("oceanrag_chat_history:"))
+      .forEach((key) => localStorage.removeItem(key));
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -76,12 +39,10 @@ export default function Chat() {
     if (value) {
       localStorage.setItem(API_KEY_STORAGE, value);
       setResolvedApplicationId("");
-      setConversationId(null);
       setMessages([]);
     } else {
       localStorage.removeItem(API_KEY_STORAGE);
       setResolvedApplicationId("");
-      setConversationId(null);
       setMessages([]);
     }
   };
@@ -105,18 +66,21 @@ export default function Chat() {
       const response = await apiClient.post(
         "/client/chat/preview/messages",
         {
-          conversation_identity:
-            `customer-preview-${resolvedApplicationId || "unresolved"}-`
-            + (conversationId || Date.now()),
+          conversation_identity: "customer-preview",
           message: currentQuestion,
-          conversation_id: conversationId,
           conversation_title: "Customer Preview",
+          conversation_messages: messages
+            .filter((message) => message.role === "user" || message.role === "bot")
+            .map((message) => ({
+              role: message.role === "user" ? "user" : "assistant",
+              content: message.content,
+            }))
+            .slice(-40),
         },
         { headers: { "X-API-Key": apiKey } }
       );
       const data = response.data;
       if (data.application_id) setResolvedApplicationId(data.application_id);
-      if (data.conversation_id) setConversationId(data.conversation_id);
 
       setMessages((current) => [
         ...current,
@@ -144,12 +108,6 @@ export default function Chat() {
   };
 
   const clearHistory = () => {
-    setConversationId(null);
-    if (resolvedApplicationId) {
-      localStorage.removeItem(
-        `${HISTORY_KEY_PREFIX}:${resolvedApplicationId}`
-      );
-    }
     setMessages([
       {
         id: `welcome-${Date.now()}`,
