@@ -3,6 +3,7 @@ import { MessageSquare, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { apiClient } from "@/api/client";
+import DateRangePicker from "@/components/DateRangePicker";
 import { Button, Card, Spinner } from "@/components/ui/Primitives";
 
 const PAGE_SIZE = 25;
@@ -48,23 +49,37 @@ export default function FeedbackTab({ applicationId, onViewConversation }) {
       setAnalytics(null);
       setEntries([]);
       setHasMore(false);
-      const filters = buildFilters(dateFrom, dateTo, ratingFilter);
       try {
-        const [analyticsResponse, entriesResponse] = await Promise.all([
+        const dateFilters = buildFilters(dateFrom, dateTo);
+        const responseFilters = buildFilters(dateFrom, dateTo, ratingFilter);
+        const requests = [
           apiClient.get(
             `/admin/feedback/application/${applicationId}/analytics`,
-            { params: filters },
+            { params: dateFilters },
           ),
           apiClient.get(`/admin/feedback/application/${applicationId}`, {
-            params: { ...filters, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+            params: { ...responseFilters, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
           }),
-        ]);
+        ];
+        if (ratingFilter) {
+          requests.push(
+            apiClient.get(
+              `/admin/feedback/application/${applicationId}/analytics`,
+              { params: responseFilters },
+            ),
+          );
+        }
+        const [analyticsResponse, entriesResponse, filteredAnalyticsResponse] =
+          await Promise.all(requests);
         if (cancelled) return;
         setAnalytics(analyticsResponse.data);
         setEntries(entriesResponse.data);
+        const matchingResponseCount = ratingFilter
+          ? filteredAnalyticsResponse.data.response_count
+          : analyticsResponse.data.response_count;
         setHasMore(
           entriesResponse.data.length === PAGE_SIZE
-          && (page + 1) * PAGE_SIZE < analyticsResponse.data.response_count
+          && (page + 1) * PAGE_SIZE < matchingResponseCount
         );
       } catch (error) {
         console.error(error);
@@ -82,11 +97,6 @@ export default function FeedbackTab({ applicationId, onViewConversation }) {
     };
   }, [applicationId, dateFrom, dateTo, page, ratingFilter]);
 
-  const changeFilter = (setter) => (event) => {
-    setPage(0);
-    setter(event.target.value);
-  };
-
   return (
     <div className="space-y-6 animate-fadeIn" data-testid="view-feedback">
       <Card className="p-6">
@@ -102,31 +112,27 @@ export default function FeedbackTab({ applicationId, onViewConversation }) {
           </p>
         </div>
 
-        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <label className="text-[11px] text-slate-400">
-            From
-            <input
-              type="date"
-              className="mt-1 w-full rounded-control border border-white/[0.1] bg-[#0b1221] p-2 text-white"
-              value={dateFrom}
-              onChange={changeFilter(setDateFrom)}
-            />
-          </label>
-          <label className="text-[11px] text-slate-400">
-            Through
-            <input
-              type="date"
-              className="mt-1 w-full rounded-control border border-white/[0.1] bg-[#0b1221] p-2 text-white"
-              value={dateTo}
-              onChange={changeFilter(setDateTo)}
-            />
-          </label>
+        <div className="mb-5 flex flex-wrap items-end gap-3">
+          <DateRangePicker
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            filterLabel="feedback submission date"
+            helperText="Filter by feedback submission date"
+            onChange={(from, to) => {
+              setPage(0);
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+          />
           <label className="text-[11px] text-slate-400">
             Star rating
             <select
               className="mt-1 w-full rounded-control border border-white/[0.1] bg-[#0b1221] p-2 text-white"
               value={ratingFilter}
-              onChange={changeFilter(setRatingFilter)}
+              onChange={(event) => {
+                setPage(0);
+                setRatingFilter(event.target.value);
+              }}
             >
               <option value="">All ratings</option>
               {[5, 4, 3, 2, 1].map((rating) => (
@@ -135,6 +141,9 @@ export default function FeedbackTab({ applicationId, onViewConversation }) {
             </select>
           </label>
         </div>
+        <p className="mb-5 text-[10px] text-slate-500">
+          The date range filters the overview and responses; star rating filters responses only.
+        </p>
 
         {isLoading && !analytics ? (
           <div className="flex justify-center py-10"><Spinner className="h-6 w-6" /></div>

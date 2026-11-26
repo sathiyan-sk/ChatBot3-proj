@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner";
 
 import { apiClient } from "@/api/client";
-import ConversationDateRangePicker from "@/components/ConversationDateRangePicker";
+import DateRangePicker from "@/components/DateRangePicker";
 import { Badge, Button, Card, Spinner } from "@/components/ui/Primitives";
 import { EmptyState } from "@/components/ui/Stats";
 
@@ -364,9 +364,11 @@ export default function ConversationsTab({
                 />
               </label>
 
-              <ConversationDateRangePicker
+              <DateRangePicker
                 dateFrom={dateFrom}
                 dateTo={dateTo}
+                filterLabel="conversation activity date"
+                helperText="Filter by activity date"
                 onChange={(from, to) => {
                   setDateFrom(from);
                   setDateTo(to);

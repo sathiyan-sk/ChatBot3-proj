@@ -3,6 +3,7 @@ import { Download, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { apiClient } from "@/api/client";
+import DateRangePicker from "@/components/DateRangePicker";
 import { Badge, Button, Card, Spinner } from "@/components/ui/Primitives";
 
 const STATUSES = ["new", "contacted", "closed"];
@@ -172,7 +173,7 @@ export default function LeadsTab({ applicationId }) {
           </div>
         </div>
 
-        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="mb-5 flex flex-wrap items-end gap-3">
           <label className="text-[11px] text-slate-400">
             Status
             <select
@@ -187,30 +188,17 @@ export default function LeadsTab({ applicationId }) {
               {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
           </label>
-          <label className="text-[11px] text-slate-400">
-            From
-            <input
-              type="date"
-              className="mt-1 w-full rounded-control border border-white/[0.1] bg-[#0b1221] p-2 text-white"
-              value={dateFrom}
-              onChange={(event) => {
-                setPage(0);
-                setDateFrom(event.target.value);
-              }}
-            />
-          </label>
-          <label className="text-[11px] text-slate-400">
-            Through
-            <input
-              type="date"
-              className="mt-1 w-full rounded-control border border-white/[0.1] bg-[#0b1221] p-2 text-white"
-              value={dateTo}
-              onChange={(event) => {
-                setPage(0);
-                setDateTo(event.target.value);
-              }}
-            />
-          </label>
+          <DateRangePicker
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            filterLabel="enquiry submission date"
+            helperText="Filter by submission date"
+            onChange={(from, to) => {
+              setPage(0);
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+          />
         </div>
 
         {isLoading ? (
