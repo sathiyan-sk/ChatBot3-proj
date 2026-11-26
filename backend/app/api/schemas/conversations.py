@@ -51,6 +51,18 @@ class ConversationResponse(BaseModel):
     updated_at: datetime
 
 
+class ConversationListItemResponse(ConversationResponse):
+    message_count: int
+    last_activity_at: datetime
+
+
+class ConversationListPageResponse(BaseModel):
+    items: list[ConversationListItemResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class ConversationDetailResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,

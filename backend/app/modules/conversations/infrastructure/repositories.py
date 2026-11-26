@@ -15,6 +15,8 @@ from app.infrastructure.db.models.message_model import (
 from app.infrastructure.db.models.settings_model import SettingsModel
 from app.modules.conversations.domain.entities import (
     Conversation,
+    ConversationListItem,
+    ConversationListPage,
     Message,
 )
 from app.modules.conversations.domain.repository_interfaces import (
@@ -152,27 +154,93 @@ class SqlAlchemyConversationRepository(
 
     def list_by_application_id(
         self,
+        *,
         application_id: str,
-    ) -> list[Conversation]:
-        statement = (
-            select(ConversationModel)
-            .where(
-                ConversationModel.application_id
-                == application_id,
+        is_active: bool | None,
+        activity_from: datetime | None,
+        activity_to: datetime | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: str,
+        limit: int,
+        offset: int,
+    ) -> ConversationListPage:
+        message_stats = (
+            select(
+                MessageModel.conversation_id.label("conversation_id"),
+                func.count(MessageModel.id).label("message_count"),
+                func.max(MessageModel.created_at).label("last_message_at"),
             )
-            .order_by(
-                ConversationModel.created_at.desc(),
+            .join(
+                ConversationModel,
+                ConversationModel.id == MessageModel.conversation_id,
             )
+            .where(ConversationModel.application_id == application_id)
+            .group_by(MessageModel.conversation_id)
+            .subquery()
         )
+        last_activity = func.coalesce(
+            message_stats.c.last_message_at,
+            ConversationModel.created_at,
+        )
+        message_count = func.coalesce(message_stats.c.message_count, 0)
+        filters = [ConversationModel.application_id == application_id]
+        if is_active is not None:
+            filters.append(ConversationModel.is_active.is_(is_active))
+        if activity_from is not None:
+            filters.append(last_activity >= activity_from)
+        if activity_to is not None:
+            filters.append(last_activity < activity_to)
+        if search:
+            escaped_search = (
+                search.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            search_pattern = f"%{escaped_search}%"
+            filters.append(
+                ConversationModel.title.ilike(search_pattern, escape="\\")
+                | ConversationModel.conversation_identity.ilike(
+                    search_pattern,
+                    escape="\\",
+                )
+            )
 
-        models = self._session.execute(
-            statement
-        ).scalars().all()
+        joined = ConversationModel.__table__.outerjoin(
+            message_stats,
+            message_stats.c.conversation_id == ConversationModel.id,
+        )
+        total = self._session.execute(
+            select(func.count(ConversationModel.id))
+            .select_from(joined)
+            .where(*filters)
+        ).scalar_one()
 
-        return [
-            map_conversation_model_to_entity(item)
-            for item in models
-        ]
+        sort_column = (
+            last_activity if sort_by == "activity" else ConversationModel.created_at
+        )
+        sort_expression = (
+            sort_column.asc() if sort_order == "asc" else sort_column.desc()
+        )
+        rows = self._session.execute(
+            select(ConversationModel, last_activity, message_count)
+            .select_from(joined)
+            .where(*filters)
+            .order_by(sort_expression, ConversationModel.id.asc())
+            .limit(limit)
+            .offset(offset)
+        ).all()
+        return ConversationListPage(
+            items=[
+                ConversationListItem(
+                    conversation=map_conversation_model_to_entity(model),
+                    message_count=int(count),
+                    last_activity_at=activity_at,
+                )
+                for model, activity_at, count in rows
+            ],
+            total=int(total),
+        )
 
     def list_by_identity(
         self,

@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.client.dependencies import get_client_application_context
 from app.api.dependencies import (
@@ -21,6 +22,8 @@ from app.api.schemas.chat import (
 from app.api.schemas.conversations import (
     AppendMessageRequest,
     ConversationDetailResponse,
+    ConversationListItemResponse,
+    ConversationListPageResponse,
     ConversationResponse,
     MessageResponse,
     ResolveConversationRequest,
@@ -116,28 +119,66 @@ def resolve_conversation(
 
 @router.get(
     "/application/{application_id}",
-    response_model=list[ConversationResponse],
+    response_model=ConversationListPageResponse,
 )
 def list_application_conversations(
     application_id: str,
+    status_filter: Literal["active", "closed"] | None = Query(
+        default=None,
+        alias="status",
+    ),
+    activity_from: datetime | None = None,
+    activity_to: datetime | None = None,
+    search: str | None = Query(default=None, max_length=255),
+    sort_by: Literal["activity", "created"] = "activity",
+    sort_order: Literal["asc", "desc"] = "desc",
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     service: ConversationApplicationService = Depends(
         get_conversation_application_service,
     ),
-) -> list[ConversationResponse]:
-    result = (
-        service.list_application_conversations(
-            query=ListApplicationConversationsQuery(
-                application_id=application_id,
-            ),
+) -> ConversationListPageResponse:
+    if activity_from and activity_to and activity_from >= activity_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Activity date range start must be before end.",
+                "code": "conversation_date_range_invalid",
+            },
         )
-    )
 
-    return [
-        ConversationResponse.model_validate(
-            _conversation_response_payload(item),
-        )
-        for item in result
-    ]
+    page = service.list_application_conversations(
+        query=ListApplicationConversationsQuery(
+            application_id=application_id,
+            is_active=(
+                None
+                if status_filter is None
+                else status_filter == "active"
+            ),
+            activity_from=activity_from,
+            activity_to=activity_to,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            offset=offset,
+        ),
+    )
+    return ConversationListPageResponse(
+        items=[
+            ConversationListItemResponse.model_validate(
+                {
+                    **_conversation_response_payload(item.conversation),
+                    "message_count": item.message_count,
+                    "last_activity_at": item.last_activity_at,
+                }
+            )
+            for item in page.items
+        ],
+        total=page.total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(

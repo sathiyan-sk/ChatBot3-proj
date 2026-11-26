@@ -26,3 +26,16 @@ class Message:
     citation_payload: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class ConversationListItem:
+    conversation: Conversation
+    message_count: int
+    last_activity_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class ConversationListPage:
+    items: list[ConversationListItem]
+    total: int

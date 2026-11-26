@@ -100,9 +100,6 @@
     try {
       let identity = localStorage.getItem(storageKey);
       if (!identity) {
-        identity = sessionStorage.getItem("oceanrag_conversation_identity");
-      }
-      if (!identity) {
         identity = `widget-${window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
       }
       localStorage.setItem(storageKey, identity);

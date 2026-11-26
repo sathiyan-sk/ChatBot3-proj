@@ -12,6 +12,8 @@ from app.modules.conversations.application.commands import (
 from app.modules.conversations.application.dto import (
     ConversationDetailDto,
     ConversationDto,
+    ConversationListItemDto,
+    ConversationListPageDto,
     MessageDto,
 )
 from app.modules.conversations.application.queries import (
@@ -159,9 +161,56 @@ class ConversationApplicationService:
     def list_application_conversations(
         self,
         query: ListApplicationConversationsQuery,
-    ) -> list[ConversationDto]:
-        conversations = self.conversation_repository.list_by_application_id(query.application_id)
-        return [self._to_conversation_dto(item) for item in conversations]
+    ) -> ConversationListPageDto:
+        if query.activity_from and query.activity_to and (
+            query.activity_from >= query.activity_to
+        ):
+            raise ApplicationError(
+                message="Activity date range start must be before end.",
+                code="conversation_date_range_invalid",
+                status_code=422,
+            )
+        if query.sort_by not in {"activity", "created"}:
+            raise ApplicationError(
+                message="Unsupported conversation sort field.",
+                code="conversation_sort_invalid",
+                status_code=422,
+            )
+        if query.sort_order not in {"asc", "desc"}:
+            raise ApplicationError(
+                message="Unsupported conversation sort order.",
+                code="conversation_sort_invalid",
+                status_code=422,
+            )
+        if not 1 <= query.limit <= 100 or query.offset < 0:
+            raise ApplicationError(
+                message="Invalid conversation pagination values.",
+                code="conversation_pagination_invalid",
+                status_code=422,
+            )
+
+        page = self.conversation_repository.list_by_application_id(
+            application_id=query.application_id,
+            is_active=query.is_active,
+            activity_from=query.activity_from,
+            activity_to=query.activity_to,
+            search=query.search.strip() if query.search else None,
+            sort_by=query.sort_by,
+            sort_order=query.sort_order,
+            limit=query.limit,
+            offset=query.offset,
+        )
+        return ConversationListPageDto(
+            items=[
+                ConversationListItemDto(
+                    conversation=self._to_conversation_dto(item.conversation),
+                    message_count=item.message_count,
+                    last_activity_at=item.last_activity_at,
+                )
+                for item in page.items
+            ],
+            total=page.total,
+        )
 
     def list_identity_conversations(
         self,

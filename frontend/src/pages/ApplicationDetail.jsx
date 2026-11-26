@@ -173,10 +173,17 @@ export default function ApplicationDetail() {
 
     const restoreSandboxConversation = async () => {
       try {
-        const { data: conversations } = await apiClient.get(
-          `/admin/conversations/application/${id}`
+        const { data: conversationPage } = await apiClient.get(
+          `/admin/conversations/application/${id}`,
+          {
+            params: {
+              status: "active",
+              search: `sandbox-${id}`,
+              limit: 1,
+            },
+          }
         );
-        const activeConversation = conversations.find(
+        const activeConversation = (conversationPage.items || []).find(
           (conversation) =>
             conversation.is_active
             && conversation.conversation_identity === `sandbox-${id}`

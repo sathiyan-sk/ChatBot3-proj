@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.modules.conversations.domain.entities import Conversation, Message
+from datetime import datetime
+
+from app.modules.conversations.domain.entities import (
+    Conversation,
+    ConversationListPage,
+    Message,
+)
 
 
 class ConversationRepositoryInterface(ABC):
@@ -41,7 +47,19 @@ class ConversationRepositoryInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_by_application_id(self, application_id: str) -> list[Conversation]:
+    def list_by_application_id(
+        self,
+        *,
+        application_id: str,
+        is_active: bool | None,
+        activity_from: datetime | None,
+        activity_to: datetime | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: str,
+        limit: int,
+        offset: int,
+    ) -> ConversationListPage:
         raise NotImplementedError
 
     @abstractmethod
