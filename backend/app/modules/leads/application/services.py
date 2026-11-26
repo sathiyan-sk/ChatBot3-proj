@@ -10,6 +10,7 @@ from app.modules.leads.domain.entities import (
     ConversationFeedbackEntry,
     FeedbackAnalytics,
     Lead,
+    LeadOperationalOverview,
 )
 from app.modules.leads.domain.policies import (
     LEAD_CONSENT_TEXT,
@@ -223,6 +224,21 @@ class LeadManagementService:
             created_to=created_to,
             limit=limit,
             offset=offset,
+        )
+
+    def lead_operational_overview(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> LeadOperationalOverview:
+        self._validate_admin_query(None, created_from, created_to, 1, 0)
+        application_id = self._normalize_uuid(application_id, "application")
+        return self.repository.operational_overview_for_application(
+            application_id=application_id,
+            created_from=created_from,
+            created_to=created_to,
         )
 
     def export_leads(

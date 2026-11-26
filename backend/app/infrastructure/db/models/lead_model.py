@@ -68,6 +68,9 @@ class LeadModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
     consented_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    first_contacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     application = relationship("ApplicationModel")
 

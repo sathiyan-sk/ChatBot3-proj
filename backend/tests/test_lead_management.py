@@ -16,7 +16,7 @@ from app.api.client.widget import start_widget_session
 from app.api.dependencies import require_admin
 from app.api.router import api_router
 from app.api.schemas.chat import ChatHistoryMessageRequest
-from app.api.admin.leads import _csv_cell
+from app.api.admin.leads import _csv_cell, export_application_lead_data
 from app.modules.leads.application.services import LeadManagementService
 from app.modules.leads.domain.entities import (
     ConversationFeedback,
@@ -24,6 +24,7 @@ from app.modules.leads.domain.entities import (
     FeedbackAnalytics,
     FeedbackRatingCount,
     Lead,
+    LeadOperationalOverview,
 )
 from app.modules.leads.domain.policies import (
     LEAD_CONSENT_TEXT_VERSION,
@@ -67,6 +68,7 @@ class _MemoryLeadRepository:
             consent_text_version=values["consent_text_version"],
             consent_text=values["consent_text"],
             consented_at=values["consented_at"],
+            first_contacted_at=None,
             created_at=now,
             updated_at=now,
         )
@@ -159,6 +161,14 @@ class _MemoryLeadRepository:
                     lead,
                     status=status,
                     internal_note=internal_note,
+                    first_contacted_at=(
+                        lead.first_contacted_at
+                        or (
+                            datetime.now(timezone.utc)
+                            if status == "contacted" and lead.status != "contacted"
+                            else None
+                        )
+                    ),
                 )
                 self.leads[key] = updated
                 return updated
@@ -170,6 +180,38 @@ class _MemoryLeadRepository:
                 del self.leads[key]
                 return True
         return False
+
+    def operational_overview_for_application(
+        self, *, application_id, created_from, created_to
+    ):
+        matching = [
+            lead
+            for lead in self.leads.values()
+            if lead.application_id == application_id
+            and (created_from is None or lead.created_at >= created_from)
+            and (created_to is None or lead.created_at < created_to)
+        ]
+        measured = [
+            lead
+            for lead in matching
+            if lead.first_contacted_at is not None
+        ]
+        return LeadOperationalOverview(
+            total_count=len(matching),
+            new_count=sum(lead.status == "new" for lead in matching),
+            contacted_count=sum(lead.status == "contacted" for lead in matching),
+            closed_count=sum(lead.status == "closed" for lead in matching),
+            average_first_contact_hours=(
+                sum(
+                    (lead.first_contacted_at - lead.created_at).total_seconds()
+                    for lead in measured
+                )
+                / (3600 * len(measured))
+                if measured
+                else None
+            ),
+            measured_first_contact_count=len(measured),
+        )
 
 
 APP_ID = str(uuid4())
@@ -287,6 +329,78 @@ def test_admin_lead_mutations_are_scoped_to_application():
         ).status
         == "contacted"
     )
+
+
+def test_lead_overview_counts_statuses_and_measures_first_contact_once():
+    repository = _MemoryLeadRepository()
+    service = LeadManagementService(repository)
+    lead = _submit(service)
+
+    contacted = service.update_lead(
+        application_id=APP_ID,
+        lead_id=lead.id,
+        status="contacted",
+        internal_note=None,
+    )
+    first_contacted_at = contacted.first_contacted_at
+    assert first_contacted_at is not None
+
+    service.update_lead(
+        application_id=APP_ID,
+        lead_id=lead.id,
+        status="contacted",
+        internal_note="Updated note",
+    )
+    service.update_lead(
+        application_id=APP_ID,
+        lead_id=lead.id,
+        status="closed",
+        internal_note="Closed",
+    )
+    new_lead = _submit(service, idempotency_key=str(uuid4()))
+
+    overview = service.lead_operational_overview(application_id=APP_ID)
+
+    assert overview.total_count == 2
+    assert overview.new_count == 1
+    assert overview.contacted_count == 0
+    assert overview.closed_count == 1
+    assert overview.measured_first_contact_count == 1
+    assert overview.average_first_contact_hours is not None
+    assert repository.leads[(APP_ID, lead.idempotency_key)].first_contacted_at == (
+        first_contacted_at
+    )
+    assert new_lead.first_contacted_at is None
+
+
+def test_lead_overview_route_is_admin_protected():
+    route = next(
+        route
+        for route in api_router.routes
+        if route.path == "/api/admin/leads/application/{application_id}/overview"
+    )
+
+    assert route.methods == {"GET"}
+    assert require_admin in {
+        dependency.call for dependency in route.dependant.dependencies
+    }
+
+
+def test_existing_contacted_lead_note_edit_does_not_invent_contact_time():
+    repository = _MemoryLeadRepository()
+    service = LeadManagementService(repository)
+    lead = _submit(service)
+    stored_lead = replace(lead, status="contacted")
+    repository.leads[(APP_ID, lead.idempotency_key)] = stored_lead
+
+    updated = service.update_lead(
+        application_id=APP_ID,
+        lead_id=lead.id,
+        status="contacted",
+        internal_note="Updated historical record",
+    )
+
+    assert updated.first_contacted_at is None
 
 
 def test_conversation_feedback_is_one_rating_per_conversation():
@@ -718,6 +832,44 @@ def test_conversation_retention_uses_each_applications_configured_days():
         for statement in session.delete_statements
     ]
     assert abs(abs((cutoffs[1] - cutoffs[0]).total_seconds()) - 8 * 86400) < 2
+
+
+def test_lead_pdf_data_export_uses_selected_filters_and_requires_admin(monkeypatch):
+    created_from = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    created_to = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    captured = {}
+    lead = _submit(LeadManagementService(_MemoryLeadRepository()))
+
+    class _Service:
+        def export_leads(self, **filters):
+            captured.update(filters)
+            return [lead]
+
+    monkeypatch.setattr("app.api.admin.leads._service", lambda _session: _Service())
+    response = export_application_lead_data(
+        application_id=APP_ID,
+        status_filter="new",
+        created_from=created_from,
+        created_to=created_to,
+        session=object(),
+    )
+
+    assert captured == {
+        "application_id": APP_ID,
+        "status": "new",
+        "created_from": created_from,
+        "created_to": created_to,
+    }
+    assert str(response[0].id) == lead.id
+    route = next(
+        route
+        for route in api_router.routes
+        if route.path == "/api/admin/leads/application/{application_id}/export/data"
+    )
+    assert route.methods == {"GET"}
+    assert require_admin in {
+        dependency.call for dependency in route.dependant.dependencies
+    }
 
 
 @pytest.mark.parametrize(

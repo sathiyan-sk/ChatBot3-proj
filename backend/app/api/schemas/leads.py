@@ -51,8 +51,18 @@ class LeadResponse(BaseModel):
     consent_text_version: str
     consent_text: str
     consented_at: datetime
+    first_contacted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class LeadOperationalOverviewResponse(BaseModel):
+    total_count: int
+    new_count: int
+    contacted_count: int
+    closed_count: int
+    average_first_contact_hours: float | None
+    measured_first_contact_count: int
 
 
 class LeadUpdateRequest(BaseModel):

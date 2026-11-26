@@ -25,6 +25,7 @@ def map_lead_model(model: LeadModel) -> Lead:
         consent_text_version=model.consent_text_version,
         consent_text=model.consent_text,
         consented_at=model.consented_at,
+        first_contacted_at=model.first_contacted_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

@@ -1860,7 +1860,15 @@ export default function ApplicationDetail() {
             }}
           />
         )}
-        {activeTab === "leads" && <LeadsTab applicationId={id} />}
+        {activeTab === "leads" && (
+          <LeadsTab
+            applicationId={id}
+            onViewConversation={(conversationId) => {
+              setConversationToOpen(conversationId);
+              setActiveTab("conversations");
+            }}
+          />
+        )}
         {activeTab === "feedback" && (
           <FeedbackTab
             applicationId={id}

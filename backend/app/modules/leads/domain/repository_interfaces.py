@@ -8,6 +8,7 @@ from app.modules.leads.domain.entities import (
     ConversationFeedbackEntry,
     FeedbackAnalytics,
     Lead,
+    LeadOperationalOverview,
 )
 
 
@@ -54,6 +55,16 @@ class LeadRepositoryInterface(ABC):
         limit: int,
         offset: int,
     ) -> list[Lead]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def operational_overview_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+    ) -> LeadOperationalOverview:
         raise NotImplementedError
 
     @abstractmethod

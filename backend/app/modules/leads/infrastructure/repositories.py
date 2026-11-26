@@ -19,6 +19,7 @@ from app.modules.leads.domain.entities import (
     FeedbackAnalytics,
     FeedbackRatingCount,
     Lead,
+    LeadOperationalOverview,
 )
 from app.modules.leads.domain.repository_interfaces import LeadRepositoryInterface
 from app.modules.leads.infrastructure.mappers import (
@@ -109,6 +110,55 @@ class SqlAlchemyLeadRepository(LeadRepositoryInterface):
         )
         return [map_lead_model(model) for model in models]
 
+    def operational_overview_for_application(
+        self,
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+    ) -> LeadOperationalOverview:
+        first_contact_seconds = func.extract(
+            "epoch",
+            LeadModel.first_contacted_at - LeadModel.created_at,
+        )
+        totals = self._session.execute(
+            select(
+                func.count(LeadModel.id),
+                func.coalesce(
+                    func.sum(case((LeadModel.status == "new", 1), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((LeadModel.status == "contacted", 1), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((LeadModel.status == "closed", 1), else_=0)),
+                    0,
+                ),
+                func.avg(first_contact_seconds),
+                func.count(LeadModel.first_contacted_at),
+            )
+            .where(
+                *self._lead_date_filters(
+                    application_id=application_id,
+                    created_from=created_from,
+                    created_to=created_to,
+                )
+            )
+        ).one()
+        average_seconds = totals[4]
+        return LeadOperationalOverview(
+            total_count=int(totals[0]),
+            new_count=int(totals[1]),
+            contacted_count=int(totals[2]),
+            closed_count=int(totals[3]),
+            average_first_contact_hours=(
+                float(average_seconds) / 3600 if average_seconds is not None else None
+            ),
+            measured_first_contact_count=int(totals[5]),
+        )
+
     def update_for_application(
         self,
         *,
@@ -127,6 +177,15 @@ class SqlAlchemyLeadRepository(LeadRepositoryInterface):
             return None
         model.status = status
         model.internal_note = internal_note
+        if (
+            status == "contacted"
+            and model.status != "contacted"
+            and model.first_contacted_at is None
+        ):
+            model.first_contacted_at = func.coalesce(
+                LeadModel.first_contacted_at,
+                func.now(),
+            )
         self._session.flush()
         self._session.refresh(model)
         return map_lead_model(model)
@@ -355,12 +414,26 @@ class SqlAlchemyLeadRepository(LeadRepositoryInterface):
         created_to: datetime | None,
     ):
         statement = select(LeadModel).where(
-            LeadModel.application_id == UUID(application_id)
+            *SqlAlchemyLeadRepository._lead_date_filters(
+                application_id=application_id,
+                created_from=created_from,
+                created_to=created_to,
+            )
         )
         if status:
             statement = statement.where(LeadModel.status == status)
-        if created_from:
-            statement = statement.where(LeadModel.created_at >= created_from)
-        if created_to:
-            statement = statement.where(LeadModel.created_at < created_to)
         return statement
+
+    @staticmethod
+    def _lead_date_filters(
+        *,
+        application_id: str,
+        created_from: datetime | None,
+        created_to: datetime | None,
+    ) -> list[ColumnElement[bool]]:
+        filters = [LeadModel.application_id == UUID(application_id)]
+        if created_from:
+            filters.append(LeadModel.created_at >= created_from)
+        if created_to:
+            filters.append(LeadModel.created_at < created_to)
+        return filters

@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_session
-from app.api.schemas.leads import LeadResponse, LeadUpdateRequest
+from app.api.schemas.leads import (
+    LeadOperationalOverviewResponse,
+    LeadResponse,
+    LeadUpdateRequest,
+)
 from app.modules.leads.application.services import LeadManagementService
 from app.modules.leads.infrastructure.repositories import SqlAlchemyLeadRepository
 
@@ -34,6 +38,7 @@ def _response(lead) -> LeadResponse:
         consent_text_version=lead.consent_text_version,
         consent_text=lead.consent_text,
         consented_at=lead.consented_at,
+        first_contacted_at=lead.first_contacted_at,
         created_at=lead.created_at,
         updated_at=lead.updated_at,
     )
@@ -68,6 +73,51 @@ def list_application_leads(
         offset=offset,
     )
     return [_response(lead) for lead in leads]
+
+
+@router.get(
+    "/application/{application_id}/export/data",
+    response_model=list[LeadResponse],
+)
+def export_application_lead_data(
+    application_id: str,
+    status_filter: str | None = Query(default=None, alias="status"),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    session: Session = Depends(get_session),
+) -> list[LeadResponse]:
+    leads = _service(session).export_leads(
+        application_id=application_id,
+        status=status_filter,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    return [_response(lead) for lead in leads]
+
+
+@router.get(
+    "/application/{application_id}/overview",
+    response_model=LeadOperationalOverviewResponse,
+)
+def get_application_lead_overview(
+    application_id: str,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    session: Session = Depends(get_session),
+) -> LeadOperationalOverviewResponse:
+    overview = _service(session).lead_operational_overview(
+        application_id=application_id,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    return LeadOperationalOverviewResponse(
+        total_count=overview.total_count,
+        new_count=overview.new_count,
+        contacted_count=overview.contacted_count,
+        closed_count=overview.closed_count,
+        average_first_contact_hours=overview.average_first_contact_hours,
+        measured_first_contact_count=overview.measured_first_contact_count,
+    )
 
 
 @router.patch(
