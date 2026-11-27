@@ -6,7 +6,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0011_application_scoped_upload_intents"
+revision = "0011_app_upload_intents"
 down_revision = "0010_conversation_closed_at"
 branch_labels = None
 depends_on = None
