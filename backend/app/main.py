@@ -8,7 +8,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.admin.ingestion import run_document_ingestion_worker
+from app.api.admin.ingestion import (
+    queue_due_website_refreshes,
+    run_document_ingestion_worker,
+)
 from app.api.admin.storage_upload_recovery import (
     cleanup_stale_storage_upload_intents,
 )
@@ -85,6 +88,23 @@ async def _run_storage_upload_recovery(session_factory, storage_settings) -> Non
         await asyncio.sleep(60)
 
 
+async def _run_website_refresh_scheduler(session_factory) -> None:
+    while True:
+        try:
+            queued_count = await asyncio.to_thread(
+                queue_due_website_refreshes,
+                session_factory,
+            )
+            if queued_count:
+                logger.info(
+                    "Queued due website source refreshes",
+                    extra={"queued_count": queued_count},
+                )
+        except Exception:
+            logger.exception("Scheduled website refresh check failed")
+        await asyncio.sleep(60)
+
+
 def create_lifespan(settings, session_factory):
     """Factory for lifespan context manager with dependency injection."""
     @asynccontextmanager
@@ -146,18 +166,26 @@ def create_lifespan(settings, session_factory):
                 settings.storage,
             )
         )
+        website_refresh_task = asyncio.create_task(
+            _run_website_refresh_scheduler(session_factory)
+        )
 
         try:
             yield
         finally:
             retention_task.cancel()
             upload_recovery_task.cancel()
+            website_refresh_task.cancel()
             try:
                 await retention_task
             except asyncio.CancelledError:
                 pass
             try:
                 await upload_recovery_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await website_refresh_task
             except asyncio.CancelledError:
                 pass
             for worker in ingestion_workers:

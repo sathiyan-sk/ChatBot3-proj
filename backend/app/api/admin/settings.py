@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, status
 
@@ -9,10 +10,15 @@ from app.api.schemas.settings import (
     CreateSettingsRequest,
     ProviderCatalogResponse,
     ProviderModelOptionResponse,
+    ConfigurationCapabilityCheckResponse,
+    ConfigurationValidationResponse,
     SettingsResponse,
     UpdateSettingsRequest,
 )
-from app.config.provider_registry import build_provider_catalog
+from app.config.provider_registry import (
+    build_provider_catalog,
+    is_supported_selection,
+)
 from app.modules.settings.application.commands import (
     CreateSettingsCommand,
     UpdateSettingsCommand,
@@ -21,6 +27,55 @@ from app.modules.settings.application.queries import GetSettingsByApplicationQue
 from app.modules.settings.application.services import SettingsApplicationService
 
 router = APIRouter(prefix="/admin/settings", tags=["Admin Settings"])
+
+
+@router.post(
+    "/by-application/{application_id}/validate",
+    response_model=ConfigurationValidationResponse,
+)
+def validate_application_configuration(
+    application_id: str,
+    service: SettingsApplicationService = Depends(get_settings_application_service),
+) -> ConfigurationValidationResponse:
+    settings = service.get_by_application(
+        GetSettingsByApplicationQuery(application_id=application_id)
+    )
+    selections = (
+        ("parser", settings.parser_provider, None),
+        ("embedding", settings.embedding_provider, settings.embedding_model),
+        ("llm", settings.llm_provider, settings.llm_model),
+    )
+    checks = []
+    for capability, provider, model in selections:
+        ready = is_supported_selection(
+            service.provider_catalog,
+            capability=capability,
+            provider=provider or "",
+            model=model,
+        )
+        checks.append(
+            ConfigurationCapabilityCheckResponse(
+                capability=capability,
+                provider=provider or "",
+                model=model,
+                ready=ready,
+                message=(
+                    "Selection is enabled by the platform and required backend "
+                    "credentials are configured."
+                    if ready
+                    else (
+                        "Selection is unavailable in the platform catalog. "
+                        "Check provider enablement, credentials, and model settings."
+                    )
+                ),
+            )
+        )
+    return ConfigurationValidationResponse(
+        application_id=application_id,
+        ready=all(check.ready for check in checks),
+        checks=checks,
+        checked_at=datetime.now(timezone.utc),
+    )
 
 
 @router.get("/provider-catalog", response_model=ProviderCatalogResponse)

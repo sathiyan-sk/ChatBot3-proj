@@ -53,3 +53,17 @@ class ApplicationDeletionSummaryResponse(BaseModel):
     settings: int
     upload_intents: int
     recent_uploads: int
+
+
+class ApplicationUsageSummaryResponse(BaseModel):
+    application_id: str
+    period_days: int
+    conversations_total: int
+    conversations_recent: int
+    user_messages_recent: int
+    documents_total: int
+    documents_searchable: int
+    documents_processing: int
+    documents_failed: int
+    leads_total: int
+    feedback_total: int

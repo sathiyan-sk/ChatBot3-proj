@@ -23,6 +23,8 @@ def map_document_model_to_entity(model: DocumentModel) -> Document:
         ingestion_version=model.ingestion_version,
         ready_version=model.ready_version,
         ingestion_attempt_count=model.ingestion_attempt_count,
+        refresh_interval_hours=model.refresh_interval_hours,
+        next_refresh_at=model.next_refresh_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

@@ -34,6 +34,7 @@ from app.api.client.dependencies import (
     get_optional_client_application_context,
     get_widget_application_id,
 )
+from app.api.dependencies import require_admin
 
 router = APIRouter(
     prefix="/client/chat",
@@ -45,6 +46,7 @@ router = APIRouter(
     "/preview/messages",
     response_model=ChatMessageResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
 )
 def create_customer_preview_message(
     request: ChatMessageRequest,
@@ -96,9 +98,18 @@ def create_customer_preview_message(
             created_at=datetime.now(timezone.utc),
         )
 
+    conversation_lines = [
+        f"{item.role}: {item.content[:2000]}"
+        for item in request.conversation_messages[-10:]
+    ]
+    conversation_lines.append(f"user: {request.message}")
     generation = platform_llm_provider.generate(
-        system_prompt="You are a helpful customer-facing assistant. Answer clearly and directly.",
-        user_prompt=request.message,
+        system_prompt=(
+            "You are a helpful assistant for general conversation. "
+            "Use the conversation history to understand follow-up questions, "
+            "and answer clearly and directly."
+        ),
+        user_prompt="\n".join(conversation_lines),
         temperature=0.2,
     )
     return ChatMessageResponse(

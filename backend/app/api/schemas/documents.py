@@ -18,6 +18,11 @@ class CreateDocumentRequest(BaseModel):
     description: str | None = None
     source_type: str = "file"
     source_uri: str | None = None
+    refresh_interval_hours: int | None = Field(default=None, ge=1, le=720)
+
+
+class UpdateWebsiteRefreshScheduleRequest(BaseModel):
+    refresh_interval_hours: int | None = Field(default=None, ge=1, le=720)
 
 
 class UpdateDocumentRequest(BaseModel):
@@ -56,5 +61,7 @@ class DocumentResponse(BaseModel):
     ingestion_version: int = 0
     ready_version: int | None = None
     ingestion_attempt_count: int = 0
+    refresh_interval_hours: int | None = None
+    next_refresh_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

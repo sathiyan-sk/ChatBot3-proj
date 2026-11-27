@@ -1,21 +1,34 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_container, clear_cors_cache
 from app.api.schemas.applications import (
     ApplicationDeletionSummaryResponse,
     ApplicationResponse,
+    ApplicationUsageSummaryResponse,
     CreateApplicationRequest,
     CreatedApplicationResponse,
     UpdateApplicationRequest,
 )
 from app.composition import ApplicationContainer
+from app.core.exceptions import ApplicationError
 from app.infrastructure.providers.storage.supabase_storage_provider import (
     SupabaseStorageProvider,
 )
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
+from app.infrastructure.db.models.application_model import ApplicationModel
+from app.infrastructure.db.models.conversation_model import ConversationModel
+from app.infrastructure.db.models.document_model import DocumentModel
+from app.infrastructure.db.models.lead_model import (
+    ConversationFeedbackModel,
+    LeadModel,
+)
+from app.infrastructure.db.models.message_model import MessageModel
 from app.modules.applications.application.commands import (
     CreateApplicationCommand,
     UpdateApplicationCommand,
@@ -218,6 +231,107 @@ def get_application_deletion_summary(
     try:
         return ApplicationDeletionSummaryResponse(
             **service.get_deletion_summary(application_id),
+        )
+    finally:
+        session.close()
+
+
+@router.get(
+    "/{application_id}/usage-summary",
+    response_model=ApplicationUsageSummaryResponse,
+)
+def get_application_usage_summary(
+    application_id: str,
+    container: ApplicationContainer = Depends(get_container),
+) -> ApplicationUsageSummaryResponse:
+    session = container.session_factory()
+    try:
+        application = session.execute(
+            select(ApplicationModel.id).where(
+                ApplicationModel.id == application_id,
+            )
+        ).scalar_one_or_none()
+        if application is None:
+            raise ApplicationError(
+                message="Application not found.",
+                code="application_not_found",
+                status_code=404,
+            )
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+        def count(query) -> int:
+            return int(session.execute(query).scalar_one() or 0)
+
+        conversations_total = count(
+            select(func.count(ConversationModel.id)).where(
+                ConversationModel.application_id == application_id,
+            )
+        )
+        conversations_recent = count(
+            select(func.count(ConversationModel.id)).where(
+                ConversationModel.application_id == application_id,
+                ConversationModel.created_at >= cutoff,
+            )
+        )
+        user_messages_recent = count(
+            select(func.count(MessageModel.id))
+            .join(
+                ConversationModel,
+                ConversationModel.id == MessageModel.conversation_id,
+            )
+            .where(
+                ConversationModel.application_id == application_id,
+                MessageModel.role == "user",
+                MessageModel.created_at >= cutoff,
+            )
+        )
+        documents_total = count(
+            select(func.count(DocumentModel.id)).where(
+                DocumentModel.application_id == application_id,
+            )
+        )
+        documents_searchable = count(
+            select(func.count(DocumentModel.id)).where(
+                DocumentModel.application_id == application_id,
+                DocumentModel.ready_version.is_not(None),
+            )
+        )
+        documents_processing = count(
+            select(func.count(DocumentModel.id)).where(
+                DocumentModel.application_id == application_id,
+                DocumentModel.status.in_(("pending", "processing")),
+            )
+        )
+        documents_failed = count(
+            select(func.count(DocumentModel.id)).where(
+                DocumentModel.application_id == application_id,
+                DocumentModel.status == "failed",
+            )
+        )
+        leads_total = count(
+            select(func.count(LeadModel.id)).where(
+                LeadModel.application_id == application_id,
+            )
+        )
+        feedback_total = count(
+            select(func.count(ConversationFeedbackModel.id)).where(
+                ConversationFeedbackModel.application_id == application_id,
+            )
+        )
+
+        return ApplicationUsageSummaryResponse(
+            application_id=application_id,
+            period_days=30,
+            conversations_total=conversations_total,
+            conversations_recent=conversations_recent,
+            user_messages_recent=user_messages_recent,
+            documents_total=documents_total,
+            documents_searchable=documents_searchable,
+            documents_processing=documents_processing,
+            documents_failed=documents_failed,
+            leads_total=leads_total,
+            feedback_total=feedback_total,
         )
     finally:
         session.close()

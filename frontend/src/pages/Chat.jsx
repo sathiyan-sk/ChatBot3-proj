@@ -137,13 +137,17 @@ export default function Chat() {
           <div>
             <div className="text-card-title text-slate-100">Customer Preview</div>
             <div className="mt-1 text-[10px] text-slate-500">
-              Uses the application resolved from the API key.
+              With an API key, uses that application&apos;s RAG and model settings. Without one, uses the platform-default LLM for general chat.
             </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={resolvedApplicationId ? "success" : "warning"}>
-            {resolvedApplicationId ? "application resolved" : "key required"}
+            {resolvedApplicationId
+              ? "application resolved"
+              : apiKey.trim()
+                ? "application not verified"
+                : "platform LLM"}
           </Badge>
           <div className="flex items-center gap-1.5">
             <Button

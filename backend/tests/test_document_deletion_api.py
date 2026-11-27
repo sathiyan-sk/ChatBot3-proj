@@ -16,6 +16,17 @@ def test_delete_document_removes_vectors_and_row(monkeypatch):
     document_id = uuid4()
     calls = []
 
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return SimpleNamespace(
+                status="failed",
+                storage_path="kb-id/document-id/source.pdf",
+            )
+
+    class FakeSession:
+        def execute(self, _statement):
+            return FakeResult()
+
     class FakeVectorProvider:
         def __init__(self, *, settings, session):
             assert settings is test_settings
@@ -24,20 +35,28 @@ def test_delete_document_removes_vectors_and_row(monkeypatch):
         def delete_document_chunks(self, *, document_id):
             calls.append(("vectors", document_id))
 
-    class FakeService:
-        def get_by_id(self, _query):
-            return SimpleNamespace(status="failed")
+    class FakeStorageProvider:
+        def __init__(self, *, settings):
+            assert settings is test_settings.storage
 
+        def delete(self, storage_path):
+            calls.append(("storage", storage_path))
+
+    class FakeService:
         def delete(self, command):
             assert isinstance(command, DeleteDocumentCommand)
             calls.append(("document", command.document_id))
             return True
 
-    test_settings = SimpleNamespace()
-    test_session = object()
+    test_settings = SimpleNamespace(storage=SimpleNamespace())
+    test_session = FakeSession()
     monkeypatch.setattr(
         "app.api.admin.documents.PgVectorProvider",
         FakeVectorProvider,
+    )
+    monkeypatch.setattr(
+        "app.api.admin.documents.SupabaseStorageProvider",
+        FakeStorageProvider,
     )
 
     response = delete_document(
@@ -51,13 +70,21 @@ def test_delete_document_removes_vectors_and_row(monkeypatch):
     assert calls == [
         ("vectors", str(document_id)),
         ("document", str(document_id)),
+        ("storage", "kb-id/document-id/source.pdf"),
     ]
 
 
 def test_delete_document_rejects_active_ingestion(monkeypatch):
-    class FakeService:
-        def get_by_id(self, _query):
+    class FakeResult:
+        def scalar_one_or_none(self):
             return SimpleNamespace(status="processing")
+
+    class FakeSession:
+        def execute(self, _statement):
+            return FakeResult()
+
+    class FakeService:
+        pass
 
     def unexpected_vector_provider(**_kwargs):
         raise AssertionError("active documents must not be deleted")
@@ -70,7 +97,7 @@ def test_delete_document_rejects_active_ingestion(monkeypatch):
     with pytest.raises(HTTPException) as error:
         delete_document(
             document_id=uuid4(),
-            session=cast(Session, object()),
+            session=cast(Session, FakeSession()),
             settings=cast(Settings, SimpleNamespace()),
             service=cast(DocumentApplicationService, FakeService()),
         )

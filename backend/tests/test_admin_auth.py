@@ -55,3 +55,25 @@ def test_admin_routes_require_authentication(monkeypatch):
     ):
         response = client.get(path)
         assert response.status_code == 401
+
+    preview_response = client.post(
+        "/api/client/chat/preview/messages",
+        json={
+            "conversation_identity": "admin-preview",
+            "message": "Hello",
+        },
+    )
+    assert preview_response.status_code == 401
+
+
+def test_customer_preview_route_is_admin_protected():
+    from app.api.router import api_router
+
+    route = next(
+        route
+        for route in api_router.routes
+        if route.path == "/api/client/chat/preview/messages"
+    )
+    assert require_admin in {
+        dependency.call for dependency in route.dependant.dependencies
+    }

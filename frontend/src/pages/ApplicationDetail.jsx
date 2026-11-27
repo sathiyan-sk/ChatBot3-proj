@@ -127,9 +127,13 @@ export default function ApplicationDetail() {
 
   // General state
   const [documents, setDocuments] = useState([]);
+  const [usageSummary, setUsageSummary] = useState(null);
+  const [usageSummaryError, setUsageSummaryError] = useState("");
   const [knowledgeBase, setKnowledgeBase] = useState(null);
   const [settings, setSettings] = useState(null);
   const [providerCatalog, setProviderCatalog] = useState(null);
+  const [configurationValidation, setConfigurationValidation] = useState(null);
+  const [isValidatingConfiguration, setIsValidatingConfiguration] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState("");
   const [settingsSaveError, setSettingsSaveError] = useState("");
   const settingsLoadIdRef = useRef(0);
@@ -253,6 +257,14 @@ export default function ApplicationDetail() {
   const documentPollDelayRef = useRef(3000);
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [websiteTitle, setWebsiteTitle] = useState("");
+  const [websiteRefreshInterval, setWebsiteRefreshInterval] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState("");
+  const [documentSourceFilter, setDocumentSourceFilter] = useState("");
+  const [documentCreatedFrom, setDocumentCreatedFrom] = useState("");
+  const [documentCreatedTo, setDocumentCreatedTo] = useState("");
+  const [documentSort, setDocumentSort] = useState("newest");
+  const [documentPage, setDocumentPage] = useState(1);
 
   // Copy states
   const [copiedSnippet, setCopiedSnippet] = useState(false);
@@ -270,6 +282,20 @@ export default function ApplicationDetail() {
   const [formOrigins, setFormOrigins] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const loadUsageSummary = async () => {
+    try {
+      const { data } = await apiClient.get(
+        `/admin/applications/${id}/usage-summary`
+      );
+      setUsageSummary(data);
+      setUsageSummaryError("");
+    } catch (error) {
+      console.error("Failed to load application usage summary.", error);
+      setUsageSummary(null);
+      setUsageSummaryError("Usage summary is currently unavailable.");
+    }
+  };
+
   const fetchAppData = async () => {
     const settingsLoadId = ++settingsLoadIdRef.current;
     setIsLoading(true);
@@ -283,6 +309,7 @@ export default function ApplicationDetail() {
       const matched = appsRes.data.find((a) => a.id === id);
       if (matched) {
         setApp(matched);
+        await loadUsageSummary();
 
         // Fetch knowledge base for this application
         let kbData = null;
@@ -473,6 +500,7 @@ export default function ApplicationDetail() {
         setSettings(data);
       }
       setSettingsLoadError("");
+      setConfigurationValidation(null);
       toast.success("RAG Parameters and System Prompt saved securely!");
       fetchAppData(); // Refresh settings
     } catch (e) {
@@ -483,6 +511,30 @@ export default function ApplicationDetail() {
         "Failed to save settings.";
       setSettingsSaveError(message);
       toast.error(message);
+    }
+  };
+
+  const handleValidateConfiguration = async () => {
+    setIsValidatingConfiguration(true);
+    try {
+      const { data } = await apiClient.post(
+        `/admin/settings/by-application/${id}/validate`
+      );
+      setConfigurationValidation(data);
+      if (data.ready) {
+        toast.success("AI configuration is enabled by the platform.");
+      } else {
+        toast.error("Some AI configuration selections are unavailable.");
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(
+        error.response?.data?.error?.message ||
+        error.response?.data?.detail ||
+        "Could not validate AI configuration."
+      );
+    } finally {
+      setIsValidatingConfiguration(false);
     }
   };
 
@@ -590,6 +642,7 @@ export default function ApplicationDetail() {
       // Refresh documents
       const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
       setDocuments(docsRes.data);
+      await loadUsageSummary();
     } catch (e) {
       console.error(e);
       toast.error(getDocumentActionError(e, "File upload or ingestion scheduling failed."));
@@ -623,13 +676,18 @@ export default function ApplicationDetail() {
         description: `Website source: ${url.toString()}`,
         source_type: "website",
         source_uri: url.toString(),
+        refresh_interval_hours: websiteRefreshInterval
+          ? Number(websiteRefreshInterval)
+          : null,
       });
 
       toast.success(`Website source "${url.hostname}" queued for ingestion.`);
       setWebsiteUrl("");
       setWebsiteTitle("");
+      setWebsiteRefreshInterval("");
       const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
       setDocuments(docsRes.data);
+      await loadUsageSummary();
     } catch (error) {
       console.error(error);
       toast.error("Website document creation failed. Please enter a valid http/https URL.");
@@ -637,8 +695,12 @@ export default function ApplicationDetail() {
   };
 
   // Opens the styled confirmation dialog instead of window.confirm
-  const handleDeleteDoc = (docId, name) => {
-    setDeleteTarget({ id: docId, name });
+  const handleDeleteDoc = (document) => {
+    setDeleteTarget({
+      id: document.id,
+      name: document.title,
+      hasStoredSource: Boolean(document.storage_path),
+    });
   };
 
   const performDeleteDoc = async () => {
@@ -648,12 +710,34 @@ export default function ApplicationDetail() {
       await apiClient.delete(`/admin/documents/${deleteTarget.id}`);
       toast.success(`Removed "${deleteTarget.name}" from directory.`);
       setDocuments((prev) => prev.filter((d) => d.id !== deleteTarget.id));
+      await loadUsageSummary();
       setDeleteTarget(null);
     } catch (e) {
       console.error(e);
       toast.error(getDocumentActionError(e, "Un-indexing file failed."));
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const updateWebsiteRefreshSchedule = async (document, value) => {
+    const refreshInterval = value ? Number(value) : null;
+    try {
+      const { data } = await apiClient.put(
+        `/admin/documents/${document.id}/refresh-schedule`,
+        { refresh_interval_hours: refreshInterval }
+      );
+      setDocuments((previous) =>
+        previous.map((item) => item.id === document.id ? data : item)
+      );
+      toast.success(
+        refreshInterval
+          ? `Website refresh set to every ${refreshInterval} hours.`
+          : "Automatic website refresh disabled."
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(getDocumentActionError(error, "Could not update website refresh schedule."));
     }
   };
 
@@ -706,12 +790,18 @@ export default function ApplicationDetail() {
       }
       // Refresh
       if (knowledgeBase?.id) {
-        const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
-        setDocuments(docsRes.data);
+        try {
+          const docsRes = await apiClient.get(`/admin/documents?knowledge_base_id=${knowledgeBase.id}`);
+          setDocuments(docsRes.data);
+          await loadUsageSummary();
+        } catch (refreshError) {
+          console.error("Could not refresh document status after queuing re-index jobs.", refreshError);
+          toast.error("Index rebuild requests were handled, but document status could not be refreshed.");
+        }
       }
     } catch (e) {
       console.error(e);
-      toast.error("Reindexing vector space failed.");
+      toast.error("Could not request the document index rebuild.");
     } finally {
       setIsRebuilding(false);
     }
@@ -964,7 +1054,49 @@ export default function ApplicationDetail() {
     );
   }
 
-  const readyCount = documents.filter((d) => d.status === "ready").length;
+  const indexedCount = documents.filter((document) => document.ready_version != null).length;
+  const filteredDocuments = documents
+    .filter((document) => {
+      const search = documentSearch.trim().toLowerCase();
+      const searchableText = [
+        document.title,
+        document.description,
+        document.source_uri,
+      ].filter(Boolean).join(" ").toLowerCase();
+      const createdDate = document.created_at
+        ? new Date(document.created_at).toISOString().slice(0, 10)
+        : "";
+      return (
+        (!search || searchableText.includes(search)) &&
+        (!documentStatusFilter || document.status === documentStatusFilter) &&
+        (!documentSourceFilter || document.source_type === documentSourceFilter) &&
+        (!documentCreatedFrom || createdDate >= documentCreatedFrom) &&
+        (!documentCreatedTo || createdDate <= documentCreatedTo)
+      );
+    })
+    .sort((left, right) => {
+      if (documentSort === "oldest") {
+        return new Date(left.created_at) - new Date(right.created_at);
+      }
+      if (documentSort === "title") {
+        return left.title.localeCompare(right.title);
+      }
+      if (documentSort === "status") {
+        return left.status.localeCompare(right.status) ||
+          left.title.localeCompare(right.title);
+      }
+      return new Date(right.created_at) - new Date(left.created_at);
+    });
+  const documentsPerPage = 10;
+  const documentPageCount = Math.max(
+    1,
+    Math.ceil(filteredDocuments.length / documentsPerPage)
+  );
+  const visibleDocumentPage = Math.min(documentPage, documentPageCount);
+  const visibleDocuments = filteredDocuments.slice(
+    (visibleDocumentPage - 1) * documentsPerPage,
+    visibleDocumentPage * documentsPerPage
+  );
 
   return (
     <PageShell className="space-y-6">
@@ -1092,9 +1224,48 @@ export default function ApplicationDetail() {
                     <span className="font-bold text-white font-mono">{documents.length}</span>
                   </div>
                   <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
-                    <span className="text-emerald-400">Indexed for RAG</span>
-                    <span className="font-bold text-emerald-400 font-mono">{readyCount}</span>
+                    <span className="text-emerald-400">Searchable in RAG</span>
+                    <span className="font-bold text-emerald-400 font-mono">{indexedCount}</span>
                   </div>
+                  {usageSummary && (
+                    <>
+                      <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
+                        <span className="text-slate-400">Pending / processing</span>
+                        <span className="font-bold text-white font-mono">
+                          {usageSummary.documents_processing}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
+                        <span className="text-slate-400">Conversations (30 days)</span>
+                        <span className="font-bold text-white font-mono">
+                          {usageSummary.conversations_recent}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
+                        <span className="text-slate-400">User messages (30 days)</span>
+                        <span className="font-bold text-white font-mono">
+                          {usageSummary.user_messages_recent}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
+                        <span className="text-slate-400">Ingestion failures</span>
+                        <span className={`font-bold font-mono ${
+                          usageSummary.documents_failed ? "text-amber-300" : "text-white"
+                        }`}>
+                          {usageSummary.documents_failed}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
+                        <span className="text-slate-400">Leads / feedback</span>
+                        <span className="font-bold text-white font-mono">
+                          {usageSummary.leads_total} / {usageSummary.feedback_total}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  {usageSummaryError && (
+                    <p className="text-[10px] text-amber-300">{usageSummaryError}</p>
+                  )}
                 </div>
               </div>
 
@@ -1243,6 +1414,25 @@ export default function ApplicationDetail() {
                         />
                       </Field>
 
+                      <Field
+                        label="Automatic refresh"
+                        htmlFor="website-refresh-interval"
+                        hint="Refresh only this URL; no linked pages are crawled."
+                        className="text-[10px]"
+                      >
+                        <Select
+                          id="website-refresh-interval"
+                          value={websiteRefreshInterval}
+                          onChange={(event) => setWebsiteRefreshInterval(event.target.value)}
+                          data-testid="website-refresh-interval"
+                        >
+                          <option value="">Off</option>
+                          <option value="24">Daily</option>
+                          <option value="168">Weekly</option>
+                          <option value="720">Every 30 days</option>
+                        </Select>
+                      </Field>
+
                       <form onSubmit={handleCreateWebsiteDocument}>
                         <Button
                           type="submit"
@@ -1265,18 +1455,128 @@ export default function ApplicationDetail() {
                         message="Upload files on the left to start building this application's knowledge base."
                       />
                     ) : (
-                      <div className="overflow-x-auto max-h-[560px] overflow-y-auto" data-testid="document-table">
+                      <div className="space-y-3" data-testid="document-table">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          <Input
+                            type="search"
+                            value={documentSearch}
+                            onChange={(event) => {
+                              setDocumentSearch(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            placeholder="Search title, description, or URL"
+                            aria-label="Search documents"
+                            data-testid="document-search"
+                          />
+                          <Select
+                            value={documentStatusFilter}
+                            onChange={(event) => {
+                              setDocumentStatusFilter(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            aria-label="Filter by document status"
+                            data-testid="document-status-filter"
+                          >
+                            <option value="">All statuses</option>
+                            {Object.keys(DOC_STATUS).map((status) => (
+                              <option key={status} value={status}>{status}</option>
+                            ))}
+                          </Select>
+                          <Select
+                            value={documentSourceFilter}
+                            onChange={(event) => {
+                              setDocumentSourceFilter(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            aria-label="Filter by source type"
+                            data-testid="document-source-filter"
+                          >
+                            <option value="">All source types</option>
+                            {[...new Set(documents.map((document) => document.source_type))]
+                              .sort()
+                              .map((sourceType) => (
+                                <option key={sourceType} value={sourceType}>
+                                  {sourceType}
+                                </option>
+                              ))}
+                          </Select>
+                          <Input
+                            type="date"
+                            value={documentCreatedFrom}
+                            onChange={(event) => {
+                              setDocumentCreatedFrom(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            aria-label="Created from date"
+                            data-testid="document-created-from"
+                          />
+                          <Input
+                            type="date"
+                            value={documentCreatedTo}
+                            onChange={(event) => {
+                              setDocumentCreatedTo(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            aria-label="Created through date"
+                            data-testid="document-created-to"
+                          />
+                          <Select
+                            value={documentSort}
+                            onChange={(event) => {
+                              setDocumentSort(event.target.value);
+                              setDocumentPage(1);
+                            }}
+                            aria-label="Sort documents"
+                            data-testid="document-sort"
+                          >
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="title">Title A–Z</option>
+                            <option value="status">Status</option>
+                          </Select>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10px] text-slate-400">
+                          <span>
+                            {filteredDocuments.length
+                              ? `Showing ${(visibleDocumentPage - 1) * documentsPerPage + 1}–${Math.min(visibleDocumentPage * documentsPerPage, filteredDocuments.length)} of ${filteredDocuments.length}`
+                              : "No documents match these filters"}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-[#00D4FF] hover:text-white disabled:text-slate-600"
+                            onClick={() => {
+                              setDocumentSearch("");
+                              setDocumentStatusFilter("");
+                              setDocumentSourceFilter("");
+                              setDocumentCreatedFrom("");
+                              setDocumentCreatedTo("");
+                              setDocumentSort("newest");
+                              setDocumentPage(1);
+                            }}
+                          >
+                            Clear filters
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
                         <table className="w-full text-left border-collapse text-xs">
                           <thead>
                             <tr className="sticky top-0 z-10 bg-[#0D1526] border-b border-white/[0.08] text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
                               <th className="py-3 px-4">Filename</th>
+                              <th className="py-3 px-4">Source</th>
                               <th className="py-3 px-4">Size</th>
                               <th className="py-3 px-4">Status</th>
+                              <th className="py-3 px-4">Refresh schedule</th>
                               <th className="py-3 px-4 text-right">Action</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {documents.map((doc) => {
+                            {visibleDocuments.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="py-8 text-center text-slate-500">
+                                  No documents match these filters.
+                                </td>
+                              </tr>
+                            ) : visibleDocuments.map((doc) => {
                               const meta = DOC_STATUS[doc.status] || {
                                 variant: "neutral",
                                 label: doc.status,
@@ -1294,6 +1594,20 @@ export default function ApplicationDetail() {
                                         {doc.title}
                                       </span>
                                     </div>
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-400">
+                                    <span className="capitalize">{doc.source_type}</span>
+                                    {doc.source_type === "website" && doc.source_uri && (
+                                      <a
+                                        href={doc.source_uri}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-1 block max-w-[180px] truncate text-[10px] text-[#00D4FF] hover:text-white"
+                                        title={doc.source_uri}
+                                      >
+                                        {doc.source_uri}
+                                      </a>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4 text-slate-400 font-mono">
                                     {doc.file_size_bytes
@@ -1323,6 +1637,37 @@ export default function ApplicationDetail() {
                                         Serving last published version {doc.ready_version}
                                       </p>
                                     )}
+                                    <p className="mt-1 text-[10px] text-slate-500">
+                                      Attempt {doc.ingestion_attempt_count || 0}
+                                      {doc.updated_at && ` · ${new Date(doc.updated_at).toLocaleString()}`}
+                                    </p>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    {doc.source_type === "website" ? (
+                                      <div className="min-w-[150px]">
+                                        <Select
+                                          value={doc.refresh_interval_hours || ""}
+                                          onChange={(event) =>
+                                            updateWebsiteRefreshSchedule(doc, event.target.value)
+                                          }
+                                          disabled={doc.status === "processing"}
+                                          aria-label={`Refresh schedule for ${doc.title}`}
+                                          data-testid={`document-refresh-schedule-${doc.id}`}
+                                        >
+                                          <option value="">Off</option>
+                                          <option value="24">Daily</option>
+                                          <option value="168">Weekly</option>
+                                          <option value="720">Every 30 days</option>
+                                        </Select>
+                                        {doc.next_refresh_at && (
+                                          <p className="mt-1 text-[10px] text-slate-500">
+                                            Next: {new Date(doc.next_refresh_at).toLocaleString()}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-600">—</span>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4">
                                     <div className="flex items-center justify-end gap-1.5">
@@ -1351,7 +1696,7 @@ export default function ApplicationDetail() {
                                         </button>
                                       )}
                                       <button
-                                        onClick={() => handleDeleteDoc(doc.id, doc.title)}
+                                        onClick={() => handleDeleteDoc(doc)}
                                         className="p-1.5 border border-red-500/15 hover:border-red-500/40 rounded-[8px] hover:bg-red-500/10 text-red-400 hover:text-red-300 transition focus:outline-none"
                                         title="Delete"
                                         data-testid={`delete-btn-${doc.id}`}
@@ -1365,6 +1710,32 @@ export default function ApplicationDetail() {
                             })}
                           </tbody>
                         </table>
+                        </div>
+                        {documentPageCount > 1 && (
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={visibleDocumentPage <= 1}
+                              onClick={() => setDocumentPage(visibleDocumentPage - 1)}
+                            >
+                              Previous
+                            </Button>
+                            <span className="text-[10px] text-slate-400">
+                              Page {visibleDocumentPage} of {documentPageCount}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={visibleDocumentPage >= documentPageCount}
+                              onClick={() => setDocumentPage(visibleDocumentPage + 1)}
+                            >
+                              Next
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </Card>
@@ -1956,9 +2327,10 @@ export default function ApplicationDetail() {
                       <Select
                         id="settings-parser-provider"
                         value={settings?.parser_provider || ""}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setConfigurationValidation(null);
                           setSettings({ ...settings, parser_provider: e.target.value })
-                        }
+                        }}
                         data-testid="settings-parser-provider"
                       >
                         {parserOptions.map((option) => (
@@ -1975,6 +2347,7 @@ export default function ApplicationDetail() {
                         value={settings?.embedding_provider || ""}
                         disabled={settings?.embedding_change_allowed === false}
                         onChange={(e) => {
+                          setConfigurationValidation(null);
                           const nextModel = embeddingOptions.find(
                             (option) => option.provider === e.target.value
                           )?.model;
@@ -2005,9 +2378,10 @@ export default function ApplicationDetail() {
                         id="settings-embedding-model"
                         value={settings?.embedding_model || ""}
                         disabled={settings?.embedding_change_allowed === false}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setConfigurationValidation(null);
                           setSettings({ ...settings, embedding_model: e.target.value })
-                        }
+                        }}
                         data-testid="settings-embedding-model"
                       >
                         {!selectedEmbeddingModels.some(
@@ -2039,6 +2413,7 @@ export default function ApplicationDetail() {
                         }
                         disabled={!llmProviders.length}
                         onChange={(e) => {
+                          setConfigurationValidation(null);
                           const nextModel = llmOptions.find(
                             (option) => option.provider === e.target.value
                           )?.model;
@@ -2070,9 +2445,10 @@ export default function ApplicationDetail() {
                             : ""
                         }
                         disabled={!selectedLlmModels.length}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setConfigurationValidation(null);
                           setSettings({ ...settings, llm_model: e.target.value })
-                        }
+                        }}
                         data-testid="settings-llm-model"
                       >
                         <option value="" disabled>
@@ -2112,6 +2488,54 @@ export default function ApplicationDetail() {
                       cannot be changed until application-wide re-embedding support is available.
                     </p>
                   )}
+
+                  <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="max-w-2xl text-[11px] text-slate-400">
+                        Validate saved selections against platform enablement and backend credential configuration.
+                        This does not send provider requests or verify network connectivity.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleValidateConfiguration}
+                        loading={isValidatingConfiguration}
+                        disabled={!settings?.id || isValidatingConfiguration}
+                        data-testid="validate-ai-configuration"
+                      >
+                        Check configuration
+                      </Button>
+                    </div>
+                    {configurationValidation && (
+                      <div
+                        role="status"
+                        className="grid gap-2 sm:grid-cols-3"
+                        data-testid="configuration-validation-results"
+                      >
+                        {configurationValidation.checks.map((check) => (
+                          <div
+                            key={check.capability}
+                            className={`rounded-control border p-3 ${
+                              check.ready
+                                ? "border-emerald-500/20 bg-emerald-500/[0.05]"
+                                : "border-amber-500/25 bg-amber-500/[0.07]"
+                            }`}
+                          >
+                            <p className={`text-[11px] font-semibold ${
+                              check.ready ? "text-emerald-300" : "text-amber-200"
+                            }`}>
+                              {check.capability}: {check.ready ? "Ready" : "Needs attention"}
+                            </p>
+                            <p className="mt-1 break-all text-[10px] text-slate-400">
+                              {[check.provider, check.model].filter(Boolean).join(" / ")}
+                            </p>
+                            <p className="mt-1 text-[10px] text-slate-500">{check.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2300,7 +2724,7 @@ export default function ApplicationDetail() {
         title="Delete document"
         message={
           deleteTarget
-            ? `Are you sure you want to delete "${deleteTarget.name}" and remove its indexed content? This cannot be undone.`
+            ? `Delete "${deleteTarget.name}"${deleteTarget.hasStoredSource ? ", its stored source file" : ""}, its database record, and indexed content? This cannot be undone.`
             : ""
         }
         confirmLabel="Delete"

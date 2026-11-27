@@ -61,3 +61,18 @@ class ProviderCatalogResponse(BaseModel):
     parsers: list[ProviderModelOptionResponse]
     embeddings: list[ProviderModelOptionResponse]
     llms: list[ProviderModelOptionResponse]
+
+
+class ConfigurationCapabilityCheckResponse(BaseModel):
+    capability: str
+    provider: str
+    model: str | None = None
+    ready: bool
+    message: str
+
+
+class ConfigurationValidationResponse(BaseModel):
+    application_id: str
+    ready: bool
+    checks: list[ConfigurationCapabilityCheckResponse]
+    checked_at: datetime

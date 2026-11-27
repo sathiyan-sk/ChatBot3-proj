@@ -461,6 +461,28 @@ def test_application_selection_overrides_only_requested_capabilities():
     ) == ("nvidia", "nvidia/nemotron-3.5-super-120b-a12b")
 
 
+def test_unconfigured_application_selections_use_platform_defaults():
+    settings = _platform_settings("")
+    application_settings = SimpleNamespace(
+        parser_provider=None,
+        embedding_provider=None,
+        embedding_model=None,
+        llm_provider=None,
+        llm_model=None,
+    )
+
+    for capability in ("parser", "embedding", "llm"):
+        assert resolve_application_selection(
+            settings,
+            application_settings,
+            capability=capability,
+        ) == resolve_application_selection(
+            settings,
+            None,
+            capability=capability,
+        )
+
+
 def _create_application(session: Session, settings: Settings) -> str:
     application_id = str(uuid4())
     session.execute(

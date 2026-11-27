@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,10 +21,20 @@ from app.infrastructure.db.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 class DocumentModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "documents"
     __table_args__ = (
+        CheckConstraint(
+            "refresh_interval_hours IS NULL OR "
+            "(refresh_interval_hours >= 1 AND refresh_interval_hours <= 720)",
+            name="refresh_interval_hours",
+        ),
+        CheckConstraint(
+            "refresh_interval_hours IS NULL OR source_type = 'website'",
+            name="refresh_website_only",
+        ),
         Index("ix_documents_application_id", "application_id"),
         Index("ix_documents_knowledge_base_id", "knowledge_base_id"),
         Index("ix_documents_status", "status"),
         Index("ix_documents_source_type", "source_type"),
+        Index("ix_documents_next_refresh_at", "next_refresh_at"),
     )
 
     application_id: Mapped[PyUUID] = mapped_column(
@@ -58,6 +76,14 @@ class DocumentModel(UuidPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
     )
     ingestion_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    refresh_interval_hours: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    next_refresh_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

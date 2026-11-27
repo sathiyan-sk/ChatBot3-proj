@@ -9,11 +9,13 @@ export const apiClient = axios.create({
   },
 });
 
-// Request interceptor to add Basic Auth for admin endpoints
+// Request interceptor to add Basic Auth for admin endpoints and the admin-only preview.
 apiClient.interceptors.request.use(
   (config) => {
-    // Add Basic Auth for admin endpoints
-    if (config.url.startsWith('/admin')) {
+    const isAdminRequest =
+      config.url.startsWith('/admin') ||
+      config.url === '/client/chat/preview/messages';
+    if (isAdminRequest) {
       const session = localStorage.getItem('oceanrag_admin_session');
       if (session) {
         try {

@@ -35,6 +35,7 @@ from app.api.schemas.ingestion import (
 )
 from app.config.provider_registry import resolve_application_selection
 from app.infrastructure.db.models.document_model import DocumentModel
+from app.infrastructure.db.models.application_model import ApplicationModel
 from app.knowledge_engine.shared.models import (
     KnowledgeIngestionPipelineRequest,
 )
@@ -52,6 +53,55 @@ from app.modules.settings.infrastructure.repositories import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def queue_due_website_refreshes(
+    session_factory: Callable[[], Session],
+    *,
+    now: datetime | None = None,
+    batch_size: int = 100,
+) -> int:
+    session = session_factory()
+    current_time = now or datetime.now(timezone.utc)
+    try:
+        documents = session.execute(
+            select(DocumentModel)
+            .join(
+                ApplicationModel,
+                ApplicationModel.id == DocumentModel.application_id,
+            )
+            .where(
+                ApplicationModel.is_active.is_(True),
+                DocumentModel.source_type == "website",
+                DocumentModel.refresh_interval_hours.is_not(None),
+                DocumentModel.next_refresh_at <= current_time,
+                DocumentModel.status.in_(("ready", "failed")),
+            )
+            .order_by(DocumentModel.next_refresh_at, DocumentModel.id)
+            .limit(batch_size)
+            .with_for_update(of=DocumentModel, skip_locked=True)
+        ).scalars().all()
+
+        for document in documents:
+            document.status = "pending"
+            document.failure_reason = None
+            document.failure_code = None
+            document.ingestion_attempt_count = 0
+            document.ingestion_next_attempt_at = None
+            document.ingestion_lease_expires_at = None
+            document.next_refresh_at = current_time + timedelta(
+                hours=document.refresh_interval_hours,
+            )
+            document.updated_at = current_time
+
+        session.commit()
+        return len(documents)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
 
 class IngestionApplication(Protocol):
     @property
@@ -1208,6 +1258,10 @@ def start_ingestion(
         document_row.ingestion_next_attempt_at = None
         document_row.ingestion_lease_expires_at = None
         document_row.failure_code = None
+        if document_row.refresh_interval_hours is not None:
+            document_row.next_refresh_at = datetime.now(timezone.utc) + timedelta(
+                hours=document_row.refresh_interval_hours,
+            )
         session.commit()
     except HTTPException:
         _safe_rollback(session)

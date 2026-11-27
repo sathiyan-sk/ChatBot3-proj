@@ -25,3 +25,5 @@ class Document:
     ready_version: int | None = None
     failure_code: str | None = None
     ingestion_attempt_count: int = 0
+    refresh_interval_hours: int | None = None
+    next_refresh_at: datetime | None = None

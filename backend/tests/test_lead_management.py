@@ -550,19 +550,24 @@ def test_chat_request_rejects_application_id_mismatched_with_api_key():
     assert error.value.detail["code"] == "chat_application_key_mismatch"
 
 
-def test_customer_preview_without_key_uses_platform_generation():
+def test_customer_preview_without_key_uses_platform_llm_with_history():
+    captured = {}
+
     class _PlatformProvider:
-        def generate(self, **_kwargs):
-            return SimpleNamespace(
-                text="Platform-default response",
-            )
+        def generate(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(text="General conversation response")
 
     response = create_customer_preview_message(
         request=SimpleNamespace(
             conversation_identity="customer-preview",
             conversation_title="Customer Preview",
-            message="Hello",
+            message="Follow-up",
             top_k=5,
+            conversation_messages=[
+                ChatHistoryMessageRequest(role="user", content="Earlier question"),
+                ChatHistoryMessageRequest(role="assistant", content="Earlier answer"),
+            ],
         ),
         http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
         application_context=None,
@@ -571,9 +576,12 @@ def test_customer_preview_without_key_uses_platform_generation():
     )
 
     assert response.application_id is None
-    assert response.answer == "Platform-default response"
+    assert response.answer == "General conversation response"
     assert response.citations == []
     assert response.actions == []
+    assert captured["user_prompt"] == (
+        "user: Earlier question\nassistant: Earlier answer\nuser: Follow-up"
+    )
 
 
 def test_keyed_customer_preview_does_not_persist_conversation():
@@ -610,7 +618,6 @@ def test_keyed_customer_preview_does_not_persist_conversation():
         http_request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
         application_context=SimpleNamespace(application_id=APP_ID),
         service=_Service(),
-        platform_llm_provider=SimpleNamespace(),
     )
 
     command = captured["command"]

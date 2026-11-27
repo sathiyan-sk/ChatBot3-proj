@@ -34,6 +34,8 @@ class SqlAlchemyDocumentRepository(DocumentRepositoryInterface):
         checksum_sha256: str | None = None,
         status: str | None = None,
         failure_reason: str | None = None,
+        refresh_interval_hours: int | None = None,
+        next_refresh_at: datetime | None = None,
     ) -> Document:
         model = DocumentModel(
             id=self._normalize_id(id),
@@ -49,6 +51,8 @@ class SqlAlchemyDocumentRepository(DocumentRepositoryInterface):
             checksum_sha256=checksum_sha256,
             status=status,
             failure_reason=failure_reason,
+            refresh_interval_hours=refresh_interval_hours,
+            next_refresh_at=next_refresh_at,
         )
         self._session.add(model)
         self._session.flush()

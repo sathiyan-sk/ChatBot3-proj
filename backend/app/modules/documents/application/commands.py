@@ -11,6 +11,7 @@ class CreateDocumentCommand:
     source_type: str
     source_uri: str
     status: str = "pending"
+    refresh_interval_hours: int | None = None
 
 
 @dataclass(slots=True, frozen=True)

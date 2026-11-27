@@ -24,6 +24,8 @@ class DocumentRepositoryInterface(ABC):
     checksum_sha256: str | None = None,
     status: str | None = None,
     failure_reason: str | None = None,
+    refresh_interval_hours: int | None = None,
+    next_refresh_at: datetime | None = None,
     ) -> Document:
         raise NotImplementedError
 

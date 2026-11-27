@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 from typing import ClassVar
 from app.core.exceptions import ApplicationError
@@ -67,6 +68,26 @@ class DocumentApplicationService:
                 status_code=404,
             )
 
+        if command.refresh_interval_hours is not None:
+            if command.source_type != "website":
+                raise ApplicationError(
+                    message="Automatic refresh is only supported for website sources.",
+                    code="document_refresh_source_unsupported",
+                    status_code=422,
+                )
+            if not 1 <= command.refresh_interval_hours <= 720:
+                raise ApplicationError(
+                    message="Website refresh interval must be between 1 and 720 hours.",
+                    code="document_refresh_interval_invalid",
+                    status_code=422,
+                )
+
+        next_refresh_at = (
+            datetime.now(timezone.utc)
+            + timedelta(hours=command.refresh_interval_hours)
+            if command.refresh_interval_hours is not None
+            else None
+        )
         created = self.document_repository.create(
             id=uuid4(),
             application_id=knowledge_base.application_id,
@@ -87,6 +108,8 @@ class DocumentApplicationService:
                 "pending",
             ).value,
             failure_reason=None,
+            refresh_interval_hours=command.refresh_interval_hours,
+            next_refresh_at=next_refresh_at,
         )
 
         return self._to_dto(created)
@@ -474,6 +497,8 @@ class DocumentApplicationService:
             ingestion_version=document.ingestion_version,
             ready_version=document.ready_version,
             ingestion_attempt_count=document.ingestion_attempt_count,
+            refresh_interval_hours=document.refresh_interval_hours,
+            next_refresh_at=document.next_refresh_at,
             created_at=document.created_at,
             updated_at=document.updated_at,
         )

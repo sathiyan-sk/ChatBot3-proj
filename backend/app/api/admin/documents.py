@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from uuid import UUID, uuid4
 
@@ -31,12 +32,17 @@ from app.api.schemas.documents import (
     CreateDocumentRequest,
     DocumentResponse,
     MarkDocumentFailedRequest,
+    UpdateWebsiteRefreshScheduleRequest,
     UpdateDocumentRequest,
 )
 from app.config.settings import Settings
 from app.infrastructure.db.models.knowledge_base_model import KnowledgeBaseModel
+from app.infrastructure.db.models.document_model import DocumentModel
 from app.infrastructure.db.models.storage_upload_intent_model import (
     StorageUploadIntentModel,
+)
+from app.infrastructure.providers.storage.supabase_storage_provider import (
+    SupabaseStorageProvider,
 )
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
 from app.modules.documents.application.commands import (
@@ -221,11 +227,55 @@ def create_document(
             description=request.description,
             source_type=request.source_type,
             source_uri=request.source_uri or "",
+            refresh_interval_hours=request.refresh_interval_hours,
         )
     )
 
     return DocumentResponse.model_validate(
         result,
+        from_attributes=True,
+    )
+
+
+@router.put(
+    "/{document_id}/refresh-schedule",
+    response_model=DocumentResponse,
+)
+def update_website_refresh_schedule(
+    document_id: UUID,
+    request: UpdateWebsiteRefreshScheduleRequest,
+    session: Session = Depends(get_session),
+) -> DocumentResponse:
+    document = session.execute(
+        select(DocumentModel)
+        .where(DocumentModel.id == document_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+    if request.refresh_interval_hours is not None and document.source_type != "website":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Automatic refresh is only supported for website sources.",
+        )
+    if document.status == "processing":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot change the refresh schedule during ingestion.",
+        )
+
+    document.refresh_interval_hours = request.refresh_interval_hours
+    document.next_refresh_at = (
+        datetime.now(timezone.utc)
+        + timedelta(hours=request.refresh_interval_hours)
+        if request.refresh_interval_hours is not None
+        else None
+    )
+    return DocumentResponse.model_validate(
+        document,
         from_attributes=True,
     )
 
@@ -420,9 +470,16 @@ def delete_document(
         get_document_application_service,
     ),
 ) -> Response:
-    document = service.get_by_id(
-        GetDocumentByIdQuery(document_id=str(document_id)),
-    )
+    document = session.execute(
+        select(DocumentModel)
+        .where(DocumentModel.id == document_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
     if document.status == "processing":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -434,6 +491,7 @@ def delete_document(
         session=session,
     )
     vector_provider.delete_document_chunks(document_id=str(document_id))
+    storage_path = document.storage_path
     deleted = service.delete(
         DeleteDocumentCommand(
             document_id=str(document_id),
@@ -445,5 +503,8 @@ def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found.",
         )
+
+    if storage_path:
+        SupabaseStorageProvider(settings=settings.storage).delete(storage_path)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
