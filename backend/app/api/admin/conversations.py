@@ -246,10 +246,11 @@ def create_application_sandbox_message(
 
 
 @router.get(
-    "/{conversation_id}",
+    "/application/{application_id}/{conversation_id}",
     response_model=ConversationDetailResponse,
 )
 def get_conversation_detail(
+    application_id: str,
     conversation_id: str,
     service: ConversationApplicationService = Depends(
         get_conversation_application_service,
@@ -258,7 +259,7 @@ def get_conversation_detail(
     result = service.get_conversation_detail(
         GetConversationDetailQuery(
             conversation_id=conversation_id,
-            application_id=None,
+            application_id=application_id,
         )
     )
 
@@ -278,10 +279,11 @@ def get_conversation_detail(
 
 
 @router.put(
-    "/{conversation_id}",
+    "/application/{application_id}/{conversation_id}",
     response_model=ConversationResponse,
 )
 def update_conversation(
+    application_id: str,
     conversation_id: str,
     payload: UpdateConversationRequest,
     service: ConversationApplicationService = Depends(
@@ -294,6 +296,7 @@ def update_conversation(
             title=payload.title,
             summary=payload.summary,
             is_active=payload.is_active,
+            application_id=application_id,
         )
     )
 
@@ -303,22 +306,19 @@ def update_conversation(
 
 
 @router.delete(
-    "/{conversation_id}",
+    "/application/{application_id}/{conversation_id}",
     response_model=ConversationResponse,
 )
 def close_conversation(
+    application_id: str,
     conversation_id: str,
     service: ConversationApplicationService = Depends(
         get_conversation_application_service,
     ),
 ) -> ConversationResponse:
-    result = service.update_conversation(
-        UpdateConversationCommand(
-            conversation_id=conversation_id,
-            title=None,
-            summary=None,
-            is_active=False,
-        )
+    result = service.close_conversation(
+        application_id=application_id,
+        conversation_id=conversation_id,
     )
 
     return ConversationResponse.model_validate(
@@ -327,11 +327,12 @@ def close_conversation(
 
 
 @router.post(
-    "/{conversation_id}/messages",
+    "/application/{application_id}/{conversation_id}/messages",
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def append_message(
+    application_id: str,
     conversation_id: str,
     payload: AppendMessageRequest,
     service: ConversationApplicationService = Depends(
@@ -361,6 +362,7 @@ def append_message(
             citation_payload=(
                 payload.citation_payload
             ),
+            application_id=application_id,
         )
     )
 

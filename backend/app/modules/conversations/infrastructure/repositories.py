@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.infrastructure.db.models.application_model import ApplicationModel
@@ -57,8 +58,18 @@ class SqlAlchemyConversationRepository(
             is_active=is_active,
         )
 
-        self._session.add(model)
-        self._session.flush()
+        try:
+            with self._session.begin_nested():
+                self._session.add(model)
+                self._session.flush()
+        except IntegrityError:
+            active = self.get_active_by_identity(
+                application_id=application_id,
+                conversation_identity=conversation_identity,
+            )
+            if active is None:
+                raise
+            return active
         self._session.refresh(model)
 
         return map_conversation_model_to_entity(
@@ -139,6 +150,7 @@ class SqlAlchemyConversationRepository(
             .order_by(
                 ConversationModel.created_at.desc(),
             )
+            .limit(1)
         )
 
         model = self._session.execute(
@@ -294,6 +306,8 @@ class SqlAlchemyConversationRepository(
 
         model.title = title
         model.summary = summary
+        if model.is_active and not is_active:
+            model.closed_at = datetime.now(timezone.utc)
         model.is_active = is_active
 
         self._session.flush()
@@ -336,10 +350,35 @@ class SqlAlchemyConversationRepository(
         for application_id, configured_days in retention_rows:
             retention_days = configured_days or default_retention_days
             cutoff = now - timedelta(days=retention_days)
+            last_message_at = (
+                select(func.max(MessageModel.created_at))
+                .where(MessageModel.conversation_id == ConversationModel.id)
+                .correlate(ConversationModel)
+                .scalar_subquery()
+            )
+            message_or_creation_activity = func.coalesce(
+                last_message_at,
+                ConversationModel.created_at,
+            )
+            retention_activity = case(
+                (
+                    ConversationModel.is_active.is_(False),
+                    func.coalesce(
+                        ConversationModel.closed_at,
+                        message_or_creation_activity,
+                    ),
+                ),
+                else_=message_or_creation_activity,
+            )
             result = self._session.execute(
                 delete(ConversationModel).where(
                     ConversationModel.application_id == application_id,
-                    ConversationModel.updated_at < cutoff,
+                    retention_activity < cutoff,
+                    or_(
+                        ConversationModel.conversation_identity
+                        != f"sandbox-{application_id}",
+                        ConversationModel.is_active.is_(False),
+                    ),
                 )
             )
             deleted_count += result.rowcount or 0
@@ -424,3 +463,9 @@ class SqlAlchemyMessageRepository(
         ).scalar_one_or_none()
 
         return int(value or 0)
+
+    def get_last_activity_at(self, conversation_id: str) -> datetime | None:
+        statement = select(func.max(MessageModel.created_at)).where(
+            MessageModel.conversation_id == conversation_id,
+        )
+        return self._session.execute(statement).scalar_one_or_none()

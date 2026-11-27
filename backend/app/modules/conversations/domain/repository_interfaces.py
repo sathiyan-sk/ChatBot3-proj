@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-
 from datetime import datetime
+from abc import ABC, abstractmethod
 
 from app.modules.conversations.domain.entities import (
     Conversation,
@@ -39,10 +38,10 @@ class ConversationRepositoryInterface(ABC):
 
     @abstractmethod
     def get_by_id_and_application_id(
-    self,
-    *,
-    conversation_id: str,
-    application_id: str,
+        self,
+        *,
+        conversation_id: str,
+        application_id: str,
     ) -> Conversation | None:
         raise NotImplementedError
 
@@ -115,4 +114,8 @@ class MessageRepositoryInterface(ABC):
 
     @abstractmethod
     def get_latest_sequence_number(self, conversation_id: str) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_last_activity_at(self, conversation_id: str) -> datetime | None:
         raise NotImplementedError

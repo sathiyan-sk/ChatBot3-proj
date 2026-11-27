@@ -49,7 +49,7 @@ def _message_response_payload(
 
 
 @router.post(
-    "/{conversation_id}/messages",
+    "/application/{application_id}/{conversation_id}/messages",
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[
@@ -57,6 +57,7 @@ def _message_response_payload(
     ],
 )
 def append_admin_conversation_message(
+    application_id: str,
     conversation_id: str,
     payload: AppendMessageRequest,
     service: ConversationApplicationService = Depends(
@@ -86,6 +87,7 @@ def append_admin_conversation_message(
             citation_payload=(
                 payload.citation_payload
             ),
+            application_id=application_id,
         )
     )
 

@@ -62,7 +62,9 @@ class ConversationApplicationService:
             if timeout is None:
                 return self._to_conversation_dto(existing_conversation)
 
-            last_activity = existing_conversation.updated_at
+            last_activity = self.message_repository.get_last_activity_at(
+                existing_conversation.id
+            ) or existing_conversation.created_at
             if last_activity.tzinfo is None:
                 last_activity = last_activity.replace(tzinfo=timezone.utc)
 
@@ -86,7 +88,14 @@ class ConversationApplicationService:
         return self._to_conversation_dto(created_conversation)
 
     def append_message(self, command: AppendMessageCommand) -> MessageDto:
-        conversation = self.conversation_repository.get_by_id(command.conversation_id)
+        conversation = (
+            self.conversation_repository.get_by_id_and_application_id(
+                conversation_id=command.conversation_id,
+                application_id=command.application_id,
+            )
+            if command.application_id is not None
+            else self.conversation_repository.get_by_id(command.conversation_id)
+        )
         if conversation is None:
             raise ApplicationError(
                 message="Conversation not found.",
@@ -102,7 +111,9 @@ class ConversationApplicationService:
 
         role = MessageRole(command.role)
         content = normalize_message_content(command.content)
-        next_sequence_number = self.message_repository.get_latest_sequence_number(conversation.id) + 1
+        next_sequence_number = (
+            self.message_repository.get_latest_sequence_number(conversation.id) + 1
+        )
 
         created_message = self.message_repository.create(
             conversation_id=conversation.id,
@@ -115,48 +126,37 @@ class ConversationApplicationService:
         return self._to_message_dto(created_message)
 
     def get_conversation_detail(
-    self,
-    query: GetConversationDetailQuery,
+        self,
+        query: GetConversationDetailQuery,
     ) -> ConversationDetailDto:
-
         if query.application_id is None:
-            conversation = (
-                self.conversation_repository.get_by_id(
+            conversation = self.conversation_repository.get_by_id(
                 query.conversation_id,
             )
-        )
         else:
-            conversation = (
-                self.conversation_repository
-                .get_by_id_and_application_id(
+            conversation = self.conversation_repository.get_by_id_and_application_id(
                 conversation_id=query.conversation_id,
                 application_id=query.application_id,
             )
-        )
 
         if conversation is None:
             raise ApplicationError(
-            message="Conversation not found.",
-            code="conversation_not_found",
-            status_code=404,
-        )
+                message="Conversation not found.",
+                code="conversation_not_found",
+                status_code=404,
+            )
 
-        messages = (
-            self.message_repository
-            .list_by_conversation_id(
+        messages = self.message_repository.list_by_conversation_id(
             conversation.id,
         )
-    )
 
         return ConversationDetailDto(
-        conversation=self._to_conversation_dto(
-            conversation,
-        ),
-        messages=[
-            self._to_message_dto(item)
-            for item in messages
-        ],
-    )
+            conversation=self._to_conversation_dto(conversation),
+            messages=[
+                self._to_message_dto(item)
+                for item in messages
+            ],
+        )
 
     def list_application_conversations(
         self,
@@ -224,21 +224,70 @@ class ConversationApplicationService:
         return [self._to_conversation_dto(item) for item in conversations]
 
     def update_conversation(self, command: UpdateConversationCommand) -> ConversationDto:
-        conversation = self.conversation_repository.get_by_id(command.conversation_id)
+        conversation = (
+            self.conversation_repository.get_by_id_and_application_id(
+                conversation_id=command.conversation_id,
+                application_id=command.application_id,
+            )
+            if command.application_id is not None
+            else self.conversation_repository.get_by_id(command.conversation_id)
+        )
         if conversation is None:
             raise ApplicationError(
                 message="Conversation not found.",
                 code="conversation_not_found",
                 status_code=404,
             )
+        if not conversation.is_active and command.is_active is True:
+            raise ApplicationError(
+                message="Closed conversations cannot be reopened.",
+                code="conversation_closed",
+                status_code=409,
+            )
 
         updated_conversation = self.conversation_repository.update(
             conversation_id=conversation.id,
-            title=normalize_title(command.title),
-            summary=normalize_summary(command.summary),
-            is_active=command.is_active,
+            title=(
+                conversation.title
+                if command.title is None
+                else normalize_title(command.title)
+            ),
+            summary=(
+                conversation.summary
+                if command.summary is None
+                else normalize_summary(command.summary)
+            ),
+            is_active=(
+                conversation.is_active
+                if command.is_active is None
+                else command.is_active
+            ),
         )
         return self._to_conversation_dto(updated_conversation)
+
+    def close_conversation(
+        self,
+        *,
+        application_id: str,
+        conversation_id: str,
+    ) -> ConversationDto:
+        conversation = self.conversation_repository.get_by_id_and_application_id(
+            conversation_id=conversation_id,
+            application_id=application_id,
+        )
+        if conversation is None:
+            raise ApplicationError(
+                message="Conversation not found.",
+                code="conversation_not_found",
+                status_code=404,
+            )
+        closed_conversation = self.conversation_repository.update(
+            conversation_id=conversation.id,
+            title=conversation.title,
+            summary=conversation.summary,
+            is_active=False,
+        )
+        return self._to_conversation_dto(closed_conversation)
 
     def _to_conversation_dto(self, conversation: Conversation) -> ConversationDto:
         return ConversationDto(

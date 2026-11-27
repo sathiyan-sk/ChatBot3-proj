@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect
+from app.infrastructure.db.models.conversation_model import ConversationModel
 
 from app.api.admin.conversations import list_application_conversations
 from app.core.exceptions import ApplicationError
@@ -151,6 +153,17 @@ def test_conversation_repository_builds_filtered_aggregated_page_queries():
     assert "messages.conversation_id" in page_sql
     assert session.statements[1].params["param_1"] == 10
     assert session.statements[1].params["param_2"] == 20
+
+
+def test_active_conversation_identity_has_partial_unique_index():
+    active_index = next(
+        index
+        for index in inspect(ConversationModel).local_table.indexes
+        if index.name == "uq_conversations_active_identity"
+    )
+
+    assert active_index.unique is True
+    assert str(active_index.dialect_options["postgresql"]["where"]) == "is_active"
 
 
 def test_conversation_list_route_returns_paginated_items_and_query_scope():

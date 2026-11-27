@@ -123,7 +123,7 @@ export default function ConversationsTab({
     setSelectedConversation(conversation);
     try {
       const { data } = await apiClient.get(
-        `/admin/conversations/${conversation.id}`
+        `/admin/conversations/application/${applicationId}/${conversation.id}`
       );
       const messages = data.messages || [];
       setSelectedConversation(withConversationStats(data.conversation, messages));
@@ -134,7 +134,7 @@ export default function ConversationsTab({
     } finally {
       setIsDetailLoading(false);
     }
-  }, []);
+  }, [applicationId]);
 
   useEffect(() => {
     if (!initialConversationId) return undefined;
@@ -144,7 +144,7 @@ export default function ConversationsTab({
       setDetailError("");
       try {
         const { data } = await apiClient.get(
-          `/admin/conversations/${initialConversationId}`
+          `/admin/conversations/application/${applicationId}/${initialConversationId}`
         );
         if (cancelled) return;
         const messages = data.messages || [];
@@ -161,11 +161,13 @@ export default function ConversationsTab({
     return () => {
       cancelled = true;
     };
-  }, [initialConversationId]);
+  }, [applicationId, initialConversationId]);
 
   const closeConversation = async (conversation) => {
     try {
-      await apiClient.delete(`/admin/conversations/${conversation.id}`);
+      await apiClient.delete(
+        `/admin/conversations/application/${applicationId}/${conversation.id}`
+      );
       if (selectedConversation?.id === conversation.id) {
         onConversationClosed?.(selectedConversation);
       }

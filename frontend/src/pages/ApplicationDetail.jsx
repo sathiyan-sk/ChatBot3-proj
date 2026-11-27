@@ -130,7 +130,9 @@ export default function ApplicationDetail() {
   const [knowledgeBase, setKnowledgeBase] = useState(null);
   const [settings, setSettings] = useState(null);
   const [providerCatalog, setProviderCatalog] = useState(null);
+  const [settingsLoadError, setSettingsLoadError] = useState("");
   const [settingsSaveError, setSettingsSaveError] = useState("");
+  const settingsLoadIdRef = useRef(0);
   const [widgetCfg, setWidgetCfg] = useState(null);
   const parserOptions = providerCatalog?.parsers || [];
   const embeddingOptions = providerCatalog?.embeddings || [];
@@ -198,7 +200,7 @@ export default function ApplicationDetail() {
         }
 
         const { data: detail } = await apiClient.get(
-          `/admin/conversations/${activeConversation.id}`
+          `/admin/conversations/application/${id}/${activeConversation.id}`
         );
         if (cancelled) return;
 
@@ -269,8 +271,12 @@ export default function ApplicationDetail() {
   const [isSaving, setIsSaving] = useState(false);
 
   const fetchAppData = async () => {
+    const settingsLoadId = ++settingsLoadIdRef.current;
     setIsLoading(true);
     setLoadError(null);
+    setSettings(null);
+    setSettingsLoadError("");
+    setSettingsSaveError("");
     try {
       // Fetch application details
       const appsRes = await apiClient.get("/admin/applications");
@@ -334,9 +340,24 @@ export default function ApplicationDetail() {
 
         try {
           const settingsRes = await apiClient.get(`/admin/settings/by-application/${id}`);
-          setSettings(settingsRes.data);
-        } catch {
-          console.warn("No settings found for this application");
+          if (settingsLoadId === settingsLoadIdRef.current) {
+            setSettings(settingsRes.data);
+          }
+        } catch (error) {
+          if (settingsLoadId !== settingsLoadIdRef.current) return;
+          setSettings(null);
+          if (error.response?.status === 404) {
+            console.info("No settings found for this application.");
+          } else {
+            console.error("Failed to load application settings.", error);
+            const message =
+              error.response?.data?.detail ||
+              "Failed to load application settings. Refresh and try again.";
+            setSettingsLoadError(
+              typeof message === "string" ? message : "Failed to load application settings."
+            );
+            toast.error("Failed to load application settings.");
+          }
         }
       } else {
         setLoadError("Application namespace not found.");
@@ -421,7 +442,7 @@ export default function ApplicationDetail() {
     try {
       if (settings?.id) {
         // Update existing settings
-        await apiClient.put(`/admin/settings/by-application/${id}`, {
+        const { data } = await apiClient.put(`/admin/settings/by-application/${id}`, {
           llm_temperature: settings.llm_temperature,
           max_context_messages: settings.max_context_messages,
           inactivity_timeout_minutes: settings.inactivity_timeout_minutes,
@@ -433,9 +454,10 @@ export default function ApplicationDetail() {
           llm_provider: settings.llm_provider,
           llm_model: settings.llm_model,
         });
+        setSettings(data);
       } else {
         // Create new settings
-        await apiClient.post("/admin/settings", {
+        const { data } = await apiClient.post("/admin/settings", {
           application_id: id,
           llm_temperature: settings?.llm_temperature ?? "0.2",
           max_context_messages: settings?.max_context_messages ?? 12,
@@ -448,7 +470,9 @@ export default function ApplicationDetail() {
           llm_provider: settings?.llm_provider,
           llm_model: settings?.llm_model,
         });
+        setSettings(data);
       }
+      setSettingsLoadError("");
       toast.success("RAG Parameters and System Prompt saved securely!");
       fetchAppData(); // Refresh settings
     } catch (e) {
@@ -1712,7 +1736,7 @@ export default function ApplicationDetail() {
                     if (sandboxConversationId) {
                       try {
                         await apiClient.delete(
-                          `/admin/conversations/${sandboxConversationId}`
+                          `/admin/conversations/application/${id}/${sandboxConversationId}`
                         );
                       } catch (error) {
                         console.error(error);
@@ -1888,9 +1912,18 @@ export default function ApplicationDetail() {
                 <span className="text-card-title text-white">RAG Settings & Parameter Core</span>
               </div>
 
-              {!settings && (
+              {!settings && !settingsLoadError && (
                 <div className="text-center py-6 text-slate-400 text-[12px] border border-dashed border-white/[0.08] rounded-card">
                   No settings configured yet. Create settings by submitting this form.
+                </div>
+              )}
+
+              {settingsLoadError && (
+                <div
+                  role="alert"
+                  className="rounded-control border border-red-500/25 bg-red-500/[0.07] p-3 text-[12px] text-red-300"
+                >
+                  {settingsLoadError}
                 </div>
               )}
 
@@ -2143,8 +2176,10 @@ export default function ApplicationDetail() {
                     max="3650"
                   />
                   <p className="mt-1 text-[10px] text-slate-500">
-                    Deletes application conversations and messages after this
-                    many inactive days. Cleanup runs hourly.
+                    Deletes conversations after this many days without a message.
+                    For closed conversations, the countdown starts when closed.
+                    Active admin sandbox conversations are retained until closed.
+                    Cleanup runs hourly.
                   </p>
                 </Field>
               </div>
@@ -2170,7 +2205,8 @@ export default function ApplicationDetail() {
                   type="submit"
                   className="uppercase tracking-wider"
                   disabled={
-                    Boolean(providerCatalog) && !isCurrentLlmSelectionAvailable
+                    Boolean(settingsLoadError) ||
+                    (Boolean(providerCatalog) && !isCurrentLlmSelectionAvailable)
                   }
                   data-testid="settings-save-btn"
                 >

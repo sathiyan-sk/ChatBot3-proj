@@ -17,6 +17,7 @@ class AppendMessageCommand:
     role: str
     content: str
     citation_payload: str | None = None
+    application_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -24,4 +25,5 @@ class UpdateConversationCommand:
     conversation_id: str
     title: str | None
     summary: str | None
-    is_active: bool
+    is_active: bool | None = None
+    application_id: str | None = None

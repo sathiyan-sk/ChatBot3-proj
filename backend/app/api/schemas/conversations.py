@@ -20,7 +20,7 @@ class AppendMessageRequest(BaseModel):
 class UpdateConversationRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     summary: str | None = Field(default=None, max_length=4000)
-    is_active: bool = True
+    is_active: bool | None = None
 
 
 class MessageResponse(BaseModel):

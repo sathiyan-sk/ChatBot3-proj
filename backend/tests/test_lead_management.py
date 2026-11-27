@@ -823,6 +823,14 @@ def test_conversation_retention_uses_each_applications_configured_days():
 
     assert deleted_count == 2
     assert len(session.delete_statements) == 2
+    cleanup_sql = str(session.delete_statements[0]).lower()
+    assert "conversation_identity !=" in cleanup_sql
+    assert "conversations.is_active is false" in cleanup_sql
+    assert "conversations.closed_at" in cleanup_sql
+    assert "messages.created_at" in cleanup_sql
+    assert f"sandbox-{first_application_id}" in str(
+        session.delete_statements[0].compile().params.values()
+    )
     cutoffs = [
         next(
             value
