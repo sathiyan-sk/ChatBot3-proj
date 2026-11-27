@@ -283,6 +283,34 @@ class PgVectorProvider(VectorStoreContract):
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    def delete_knowledge_base_chunks(self, *, knowledge_base_id: str) -> int:
+        """Remove indexed chunks, including chunks whose document row is gone."""
+        table_name = self.settings.vector_store_table_name
+        result = self.session.execute(
+            text(
+                f"""
+                delete from {table_name}
+                where knowledge_base_id = cast(:knowledge_base_id as text)
+                """
+            ),
+            {"knowledge_base_id": str(knowledge_base_id)},
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def count_knowledge_base_chunks(self, *, knowledge_base_id: str) -> int:
+        table_name = self.settings.vector_store_table_name
+        result = self.session.execute(
+            text(
+                f"""
+                select count(*)
+                from {table_name}
+                where knowledge_base_id = cast(:knowledge_base_id as text)
+                """
+            ),
+            {"knowledge_base_id": str(knowledge_base_id)},
+        )
+        return int(result.scalar_one() or 0)
+
     def delete_obsolete_document_versions(
         self,
         *,

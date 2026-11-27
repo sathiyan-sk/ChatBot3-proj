@@ -117,8 +117,14 @@ def test_upload_intent_and_document_are_committed_as_two_phase_saga():
         def __init__(self):
             self.intent = None
 
+        def execute(self, _statement):
+            return SimpleNamespace(
+                scalar_one_or_none=lambda: application_id,
+            )
+
         def add(self, intent):
             self.intent = intent
+            assert intent.application_id == application_id
             events.append("intent_added")
 
         def commit(self):
@@ -245,7 +251,10 @@ def test_supabase_delete_reports_upstream_error_for_recovery_retry(monkeypatch):
         storage.delete("kb/document/file.pdf")
 
     assert exc_info.value.code == "storage_delete_failed"
-    assert exc_info.value.details == {"upstream_status": 400}
+    assert exc_info.value.details == {
+        "upstream_status": 400,
+        "object_count": 1,
+    }
 
 
 def test_supabase_delete_treats_missing_object_as_already_removed(monkeypatch):
@@ -270,3 +279,60 @@ def test_supabase_delete_treats_missing_object_as_already_removed(monkeypatch):
     )
 
     storage.delete("kb/document/already-gone.pdf")
+
+
+def test_supabase_delete_prefix_lists_nested_objects_and_removes_them(monkeypatch):
+    listed = []
+    deleted = []
+
+    def fake_post(url, **kwargs):
+        prefix = kwargs["json"]["prefix"]
+        listed.append(prefix)
+        if prefix == "knowledge-base":
+            entries = [{"name": "document", "id": None}]
+        else:
+            entries = [
+                {"name": "guide.pdf", "id": "object-id"},
+                {"name": "nested", "id": None},
+            ] if prefix.endswith("/document") else [
+                {"name": "source.txt", "id": "nested-object-id"}
+            ]
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json=entries,
+        )
+
+    def fake_delete(method, url, **kwargs):
+        deleted.extend(kwargs["json"]["prefixes"])
+        return httpx.Response(200, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(
+        "app.infrastructure.providers.storage.supabase_storage_provider.httpx.post",
+        fake_post,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.providers.storage.supabase_storage_provider.httpx.request",
+        fake_delete,
+    )
+    storage = SupabaseStorageProvider(
+        settings=StorageSettings(
+            supabase_url="https://storage.example",
+            supabase_bucket_name="data_files",
+            supabase_service_role_key="test-service-key",
+            provider_timeout_seconds=10,
+        )
+    )
+
+    deleted_count = storage.delete_prefix("knowledge-base")
+
+    assert listed == [
+        "knowledge-base",
+        "knowledge-base/document",
+        "knowledge-base/document/nested",
+    ]
+    assert deleted_count == 2
+    assert deleted == [
+        "knowledge-base/document/guide.pdf",
+        "knowledge-base/document/nested/source.txt",
+    ]

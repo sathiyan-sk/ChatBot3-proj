@@ -18,6 +18,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
     get_document_application_service,
@@ -32,8 +34,11 @@ from app.api.schemas.documents import (
     UpdateDocumentRequest,
 )
 from app.config.settings import Settings
+from app.infrastructure.db.models.knowledge_base_model import KnowledgeBaseModel
+from app.infrastructure.db.models.storage_upload_intent_model import (
+    StorageUploadIntentModel,
+)
 from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
-from sqlalchemy.orm import Session
 from app.modules.documents.application.commands import (
     ArchiveDocumentCommand,
     CreateDocumentCommand,
@@ -51,11 +56,6 @@ from app.modules.documents.application.queries import (
 from app.modules.documents.application.services import (
     DocumentApplicationService,
 )
-from app.infrastructure.db.models.storage_upload_intent_model import (
-    StorageUploadIntentModel,
-)
-
-
 router = APIRouter(
     prefix="/admin/documents",
     tags=["Admin Documents"],
@@ -149,8 +149,22 @@ def upload_document(
 
     document_id = uuid4()
     storage_path = f"{knowledge_base_id}/{document_id}/{filename}"
+    application_id = session.execute(
+        select(KnowledgeBaseModel.application_id).where(
+            KnowledgeBaseModel.id == knowledge_base_id,
+        )
+    ).scalar_one_or_none()
+    if application_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "knowledge_base_not_found",
+                "message": "Knowledge base not found.",
+            },
+        )
     upload_intent = StorageUploadIntentModel(
         id=uuid4(),
+        application_id=application_id,
         storage_path=storage_path,
     )
     session.add(upload_intent)

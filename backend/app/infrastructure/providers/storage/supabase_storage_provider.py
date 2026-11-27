@@ -66,6 +66,16 @@ class SupabaseStorageProvider(StorageContract):
             f"{encoded_path}"
         )
 
+    def _object_list_url(self) -> str:
+        bucket_name = quote(
+            self.settings.supabase_bucket_name,
+            safe="",
+        )
+        return (
+            f"{self.settings.supabase_url.rstrip('/')}"
+            f"/storage/v1/object/list/{bucket_name}"
+        )
+
     def _headers(
         self,
         content_type: str | None = None,
@@ -197,6 +207,104 @@ class SupabaseStorageProvider(StorageContract):
 
     def delete(self, storage_path: str) -> None:
         normalized_path = self._normalize_path(storage_path)
+        self._delete_paths([normalized_path])
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        normalized_prefix = self._normalize_path(prefix).rstrip("/")
+        pending_prefixes = [normalized_prefix]
+        visited_prefixes: set[str] = set()
+        object_paths: set[str] = set()
+
+        while pending_prefixes:
+            current_prefix = pending_prefixes.pop()
+            if current_prefix in visited_prefixes:
+                continue
+            visited_prefixes.add(current_prefix)
+
+            offset = 0
+            while True:
+                try:
+                    response = httpx.post(
+                        self._object_list_url(),
+                        headers=self._headers("application/json"),
+                        json={
+                            "prefix": current_prefix,
+                            "limit": 1000,
+                            "offset": offset,
+                        },
+                        timeout=self.settings.provider_timeout_seconds,
+                    )
+                    response.raise_for_status()
+                    try:
+                        entries = response.json()
+                    except ValueError as exc:
+                        raise ApplicationError(
+                            message="Storage returned an invalid object listing.",
+                            code="storage_list_invalid",
+                            status_code=502,
+                        ) from exc
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        entries = []
+                    else:
+                        raise ApplicationError(
+                            message="Stored files could not be enumerated for deletion.",
+                            code="storage_list_failed",
+                            status_code=502,
+                            details={
+                                "upstream_status": exc.response.status_code,
+                            },
+                        ) from exc
+                except httpx.HTTPError as exc:
+                    raise ApplicationError(
+                        message="Stored files could not be enumerated for deletion.",
+                        code="storage_list_failed",
+                        status_code=502,
+                    ) from exc
+
+                if not isinstance(entries, list):
+                    raise ApplicationError(
+                        message="Storage returned an invalid object listing.",
+                        code="storage_list_invalid",
+                        status_code=502,
+                    )
+
+                for entry in entries:
+                    name = entry.get("name") if isinstance(entry, dict) else None
+                    if (
+                        not isinstance(name, str)
+                        or not name
+                        or name in {".", ".."}
+                        or "/" in name
+                        or "\\" in name
+                    ):
+                        raise ApplicationError(
+                            message="Storage returned an invalid object path.",
+                            code="storage_list_invalid",
+                            status_code=502,
+                        )
+
+                    object_path = f"{current_prefix}/{name}"
+                    if entry.get("id") is None:
+                        pending_prefixes.append(object_path)
+                    else:
+                        object_paths.add(object_path)
+
+                if len(entries) < 1000:
+                    break
+                offset += len(entries)
+
+        return sorted(object_paths)
+
+    def delete_prefix(self, prefix: str) -> int:
+        paths = self.list_prefix(prefix)
+        for start in range(0, len(paths), 100):
+            self._delete_paths(paths[start : start + 100])
+        return len(paths)
+
+    def _delete_paths(self, storage_paths: list[str]) -> None:
+        if not storage_paths:
+            return
         try:
             response = httpx.request(
                 "DELETE",
@@ -206,7 +314,7 @@ class SupabaseStorageProvider(StorageContract):
                     f"{self.settings.supabase_bucket_name}"
                 ),
                 headers=self._headers(),
-                json={"prefixes": [normalized_path]},
+                json={"prefixes": storage_paths},
                 timeout=self.settings.provider_timeout_seconds,
             )
             response.raise_for_status()
@@ -217,14 +325,17 @@ class SupabaseStorageProvider(StorageContract):
                 "Supabase Storage object deletion failed",
                 extra={
                     "upstream_status": exc.response.status_code,
-                    "storage_path": normalized_path,
+                    "storage_paths": storage_paths,
                 },
             )
             raise ApplicationError(
                 message="Uploaded file cleanup failed.",
                 code="storage_delete_failed",
                 status_code=502,
-                details={"upstream_status": exc.response.status_code},
+                details={
+                    "upstream_status": exc.response.status_code,
+                    "object_count": len(storage_paths),
+                },
             ) from exc
         except httpx.HTTPError as exc:
             raise ApplicationError(

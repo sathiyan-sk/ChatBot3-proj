@@ -36,3 +36,20 @@ class CreatedApplicationResponse(BaseModel):
     application: ApplicationResponse
     api_key: str
     api_key_prefix: str
+
+
+class ApplicationDeletionSummaryResponse(BaseModel):
+    knowledge_bases: int
+    documents: int
+    processing_documents: int
+    stored_files: int
+    indexed_chunks: int
+    conversations: int
+    messages: int
+    leads: int
+    feedback: int
+    api_keys: int
+    widgets: int
+    settings: int
+    upload_intents: int
+    recent_uploads: int

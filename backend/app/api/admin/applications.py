@@ -1,21 +1,29 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_container, clear_cors_cache
 from app.api.schemas.applications import (
+    ApplicationDeletionSummaryResponse,
     ApplicationResponse,
     CreateApplicationRequest,
     CreatedApplicationResponse,
     UpdateApplicationRequest,
 )
 from app.composition import ApplicationContainer
+from app.infrastructure.providers.storage.supabase_storage_provider import (
+    SupabaseStorageProvider,
+)
+from app.infrastructure.providers.vector.pgvector_provider import PgVectorProvider
 from app.modules.applications.application.commands import (
     CreateApplicationCommand,
     UpdateApplicationCommand,
 )
 from app.modules.applications.application.services import ApplicationServices
+from app.modules.applications.application.deletion import (
+    ApplicationDeletionService,
+)
 from app.modules.applications.infrastructure.repositories import (
     ApplicationProvisioningSqlAlchemyRepository,
     ApplicationSqlAlchemyRepository,
@@ -40,6 +48,23 @@ def _build_application_services(
         platform_settings=container.settings,
     )
 
+    return session, service
+
+
+def _build_application_deletion_service(
+    container: ApplicationContainer,
+) -> tuple[Session, ApplicationDeletionService]:
+    session = container.session_factory()
+    service = ApplicationDeletionService(
+        session=session,
+        storage_provider=SupabaseStorageProvider(
+            settings=container.settings.storage,
+        ),
+        vector_provider=PgVectorProvider(
+            settings=container.settings,
+            session=session,
+        ),
+    )
     return session, service
 
 
@@ -162,16 +187,56 @@ def update_application(
 
 @router.delete(
     "/{application_id}",
+    status_code=204,
+)
+def permanently_delete_application(
+    application_id: str,
+    request: Request,
+    container: ApplicationContainer = Depends(get_container),
+) -> Response:
+    session, service = _build_application_deletion_service(container)
+
+    try:
+        service.delete_permanently(application_id)
+        return Response(status_code=204)
+
+    finally:
+        clear_cors_cache(request)
+        session.close()
+
+
+@router.get(
+    "/{application_id}/deletion-summary",
+    response_model=ApplicationDeletionSummaryResponse,
+)
+def get_application_deletion_summary(
+    application_id: str,
+    container: ApplicationContainer = Depends(get_container),
+) -> ApplicationDeletionSummaryResponse:
+    session, service = _build_application_deletion_service(container)
+
+    try:
+        return ApplicationDeletionSummaryResponse(
+            **service.get_deletion_summary(application_id),
+        )
+    finally:
+        session.close()
+
+
+@router.post(
+    "/{application_id}/deactivate",
     response_model=ApplicationResponse,
 )
 def deactivate_application(
     application_id: str,
+    request: Request,
     container: ApplicationContainer = Depends(get_container),
 ) -> ApplicationResponse:
     session, service = _build_application_services(container)
 
     try:
         result = service.deactivate_application(application_id)
+        clear_cors_cache(request)
         return _application_response(result)
 
     finally:

@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import {
   Plus, Database, Cpu, Eye, Pencil, Power, Copy, Check,
-  AlertTriangle, Search, FileText, BookOpen, Puzzle, Inbox, X,
+  AlertTriangle, Search, FileText, BookOpen, Puzzle, Inbox, X, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,6 +15,7 @@ import { PageShell, PageHeader, SectionHeader, Toolbar } from "@/components/ui/L
 import { StatCard, EmptyState } from "@/components/ui/Stats";
 import { Modal, ConfirmDialog } from "@/components/ui/Overlays";
 import { OverflowMenu } from "@/components/ui/OverflowMenu";
+import { Input } from "@/components/ui/Form";
 
 /* ============================================================
    DASHBOARD - Applications grid
@@ -72,6 +73,13 @@ export default function Dashboard() {
   // Styled deactivate confirmation
   const [confirmApp, setConfirmApp] = useState(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
+  const [deleteApp, setDeleteApp] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeletingApp, setIsDeletingApp] = useState(false);
+  const [deletionSummary, setDeletionSummary] = useState(null);
+  const [isLoadingDeletionSummary, setIsLoadingDeletionSummary] = useState(false);
+  const [deletionSummaryError, setDeletionSummaryError] = useState("");
+  const deletionSummaryRequestRef = useRef(0);
 
   /* ---------------- data loading ---------------- */
 
@@ -254,11 +262,22 @@ export default function Dashboard() {
     }
   };
 
+  const closeDeleteDialog = () => {
+    if (isDeletingApp) return;
+    deletionSummaryRequestRef.current += 1;
+    setDeleteApp(null);
+    setDeleteConfirmation("");
+    setDeletionSummary(null);
+    setDeletionSummaryError("");
+  };
+
   const handleDeactivate = async () => {
     if (!confirmApp) return;
     setIsDeactivating(true);
     try {
-      await apiClient.delete(`/admin/applications/${confirmApp.id}`);
+      await apiClient.post(
+        `/admin/applications/${confirmApp.id}/deactivate`
+      );
       toast.success(`Application "${confirmApp.name}" deactivated.`);
       setConfirmApp(null);
       await loadApps();
@@ -267,6 +286,84 @@ export default function Dashboard() {
       toast.error("Failed to deactivate application.");
     } finally {
       setIsDeactivating(false);
+    }
+  };
+
+  const handleActivate = async (app) => {
+    try {
+      await apiClient.put(`/admin/applications/${app.id}`, {
+        name: app.name,
+        description: app.description,
+        client_type: app.client_type,
+        allowed_origins: app.allowed_origins,
+        is_active: true,
+      });
+      toast.success(`Application "${app.name}" activated.`);
+      await loadApps();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e.response?.data?.error?.message ||
+        e.response?.data?.detail ||
+        "Failed to activate application."
+      );
+    }
+  };
+
+  const loadDeletionSummary = async (app) => {
+    const requestId = ++deletionSummaryRequestRef.current;
+    setDeleteApp(app);
+    setDeleteConfirmation("");
+    setDeletionSummary(null);
+    setDeletionSummaryError("");
+    setIsLoadingDeletionSummary(true);
+    try {
+      const { data } = await apiClient.get(
+        `/admin/applications/${app.id}/deletion-summary`
+      );
+      if (requestId === deletionSummaryRequestRef.current) {
+        setDeletionSummary(data);
+      }
+    } catch (e) {
+      console.error(e);
+      if (requestId === deletionSummaryRequestRef.current) {
+        setDeletionSummaryError(
+          e.response?.data?.error?.message ||
+          e.response?.data?.detail ||
+          "Could not load the deletion impact summary."
+        );
+      }
+    } finally {
+      if (requestId === deletionSummaryRequestRef.current) {
+        setIsLoadingDeletionSummary(false);
+      }
+    }
+  };
+
+  const handleDeleteApplication = async () => {
+    if (
+      !deleteApp ||
+      deleteConfirmation !== deleteApp.name ||
+      isDeletingApp
+    ) return;
+    setIsDeletingApp(true);
+    try {
+      await apiClient.delete(`/admin/applications/${deleteApp.id}`);
+      toast.success(`Application "${deleteApp.name}" and its data were deleted.`);
+      deletionSummaryRequestRef.current += 1;
+      setDeleteApp(null);
+      setDeleteConfirmation("");
+      setDeletionSummary(null);
+      await loadApps();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e.response?.data?.error?.message ||
+        e.response?.data?.detail ||
+        "Application deletion did not complete. You can retry it."
+      );
+    } finally {
+      setIsDeletingApp(false);
     }
   };
 
@@ -513,11 +610,21 @@ export default function Dashboard() {
                         onSelect: () => openEditModal(app),
                       },
                       {
-                        label: "Deactivate",
+                        label: app.is_active ? "Deactivate" : "Activate",
                         icon: Power,
+                        danger: app.is_active,
+                        onSelect: () => (
+                          app.is_active
+                            ? setConfirmApp(app)
+                            : handleActivate(app)
+                        ),
+                      },
+                      {
+                        label: "Delete permanently",
+                        icon: Trash2,
                         danger: true,
-                        disabled: !app.is_active,
-                        onSelect: () => setConfirmApp(app),
+                        disabled: app.is_active,
+                        onSelect: () => loadDeletionSummary(app),
                       },
                     ]}
                   />
@@ -744,6 +851,142 @@ export default function Dashboard() {
         confirmLabel="Deactivate"
         pending={isDeactivating}
       />
+
+      <Modal
+        open={!!deleteApp}
+        onClose={closeDeleteDialog}
+        title="Permanently delete application"
+        description={
+          deleteApp
+            ? `This permanently deletes "${deleteApp.name}" and all data belonging to it.`
+            : ""
+        }
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={closeDeleteDialog}
+              disabled={isDeletingApp}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleDeleteApplication}
+              loading={isDeletingApp}
+              disabled={
+                !deleteApp ||
+                !deletionSummary ||
+                isLoadingDeletionSummary ||
+                Boolean(deletionSummaryError) ||
+                deletionSummary?.processing_documents > 0 ||
+                deletionSummary?.recent_uploads > 0 ||
+                deleteConfirmation !== deleteApp.name
+              }
+            >
+              Delete everything
+            </Button>
+          </>
+        }
+      >
+        {deleteApp && (
+          <div className="space-y-4">
+            <div
+              role="alert"
+              className="rounded-control border border-red-500/25 bg-red-500/[0.07] p-3 text-[12px] leading-relaxed text-red-300"
+            >
+              This cannot be undone. The application, API keys, knowledge
+              base, uploaded files, indexed vectors, settings, conversations,
+              leads, and feedback will be permanently removed. Deactivate
+              the application before deleting it.
+            </div>
+            {isLoadingDeletionSummary ? (
+              <div className="flex items-center gap-2 text-meta text-slate-400">
+                <Spinner className="h-4 w-4" />
+                Loading deletion impact...
+              </div>
+            ) : deletionSummaryError ? (
+              <div className="space-y-2" role="alert">
+                <p className="text-[12px] text-red-300">
+                  {deletionSummaryError}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadDeletionSummary(deleteApp)}
+                >
+                  Retry summary
+                </Button>
+              </div>
+            ) : deletionSummary ? (
+              <div className="grid grid-cols-2 gap-2 rounded-control border border-white/[0.08] p-3 text-[11px]">
+                {[
+                  ["Knowledge bases", "knowledge_bases"],
+                  ["Documents", "documents"],
+                  ["Processing documents", "processing_documents"],
+                  ["Stored files", "stored_files"],
+                  ["Indexed chunks", "indexed_chunks"],
+                  ["Conversations", "conversations"],
+                  ["Messages", "messages"],
+                  ["Leads", "leads"],
+                  ["Feedback", "feedback"],
+                  ["API keys", "api_keys"],
+                  ["Widgets", "widgets"],
+                  ["Settings", "settings"],
+                  ["Pending uploads", "upload_intents"],
+                  ["Recent uploads", "recent_uploads"],
+                ].map(([label, key]) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-2 text-slate-400"
+                  >
+                    <span>{label}</span>
+                    <span className="font-mono text-white">
+                      {deletionSummary[key]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {deletionSummary && (
+              <>
+                {(deletionSummary.processing_documents > 0 ||
+                  deletionSummary.recent_uploads > 0) && (
+                  <p className="text-[11px] leading-relaxed text-amber-300">
+                    Deletion is paused while documents are processing or uploads
+                    are finishing. Wait for them to complete, then refresh this
+                    summary before retrying.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadDeletionSummary(deleteApp)}
+                  disabled={isLoadingDeletionSummary || isDeletingApp}
+                >
+                  Refresh counts
+                </Button>
+              </>
+            )}
+            <label
+              htmlFor="delete-application-confirmation"
+              className="block text-meta text-slate-300"
+            >
+              Type <span className="font-mono text-white">{deleteApp.name}</span>{" "}
+              to confirm.
+            </label>
+            <Input
+              id="delete-application-confirmation"
+              autoComplete="off"
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              disabled={isDeletingApp || !deletionSummary}
+            />
+          </div>
+        )}
+      </Modal>
     </PageShell>
   );
 }
