@@ -1092,15 +1092,14 @@ export default function ApplicationDetail() {
                     <span className="font-bold text-white font-mono">{documents.length}</span>
                   </div>
                   <div className="flex justify-between items-center bg-white/[0.03] p-2.5 rounded-[10px] border border-white/[0.06]">
-                    <span className="text-emerald-400">Indexed (RAG ground)</span>
+                    <span className="text-emerald-400">Indexed for RAG</span>
                     <span className="font-bold text-emerald-400 font-mono">{readyCount}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-white/[0.06] text-[10px] text-slate-500 font-mono flex items-center gap-1.5 mt-4">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>Isolated FAISS database: active</span>
+              <div className="pt-4 border-t border-white/[0.06] text-[10px] text-slate-500 font-mono mt-4">
+                <span>Vector index backend: PostgreSQL / pgvector</span>
               </div>
             </Card>
           </div>
@@ -1147,11 +1146,11 @@ export default function ApplicationDetail() {
                     data-testid="reindex-btn"
                   >
                     {isRebuilding ? (
-                      <span>Syncing FAISS database...</span>
+                      <span>Queueing index rebuild...</span>
                     ) : (
                       <>
                         <RefreshCw className="h-3.5 w-3.5" />
-                        <span>Rebuild Vector Space</span>
+                        <span>Rebuild pgvector index</span>
                       </>
                     )}
                   </Button>
