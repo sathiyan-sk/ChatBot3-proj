@@ -65,6 +65,14 @@
   let titleEl = null;
   let unreadBadge = null;
   let starterPromptsBox = null;
+  let widgetContainer = null;
+  let selectionBubble = null;
+  let selectionBubbleText = null;
+  let selectionContextBox = null;
+  let selectionContextText = null;
+  let selectedPageText = "";
+  let selectionUpdateFrame = null;
+  let outsidePointerStart = null;
 
   function relativeLuminance(hex) {
     const safe = String(hex || "").trim().replace(/^#/, "");
@@ -174,6 +182,7 @@
     launcher.setAttribute("aria-expanded", "true");
     unreadCount = 0;
     updateUnreadBadge();
+    renderSelectionContext();
     // Move focus into the panel for keyboard / screen-reader users.
     window.setTimeout(() => textInput.focus(), 180);
   }
@@ -182,6 +191,67 @@
     chatbox.classList.add("oceanrag-hidden");
     launcher.classList.remove("oceanrag-launcher-open");
     launcher.setAttribute("aria-expanded", "false");
+    renderSelectionContext();
+  }
+
+  function renderSelectionContext() {
+    if (!selectionContextBox || !selectionBubble || !textInput) return;
+    if (!selectedPageText) {
+      selectionContextBox.classList.add("oceanrag-hidden");
+      selectionBubble.classList.add("oceanrag-hidden");
+      textInput.required = true;
+      return;
+    }
+
+    selectionContextText.textContent = selectedPageText;
+    selectionBubbleText.textContent = selectedPageText;
+    const panelOpen = isChatboxOpen();
+    selectionContextBox.classList.toggle("oceanrag-hidden", !panelOpen);
+    selectionBubble.classList.toggle("oceanrag-hidden", panelOpen);
+    textInput.required = false;
+  }
+
+  function clearSelectionContext() {
+    selectedPageText = "";
+    renderSelectionContext();
+  }
+
+  function updateSelectionContext() {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim() || "";
+    if (!selection || !selectedText || !selection.rangeCount) {
+      if (!widgetContainer.contains(document.activeElement)) {
+        clearSelectionContext();
+      }
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (widgetContainer && range.intersectsNode(widgetContainer)) return;
+
+    selectedPageText = selectedText;
+    renderSelectionContext();
+  }
+
+  function sendSelectedText() {
+    if (!selectedPageText || !textInput || textInput.disabled) return;
+    if (!isChatboxOpen()) openChatbox();
+    textInput.value = "";
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      handleQuerySubmit(new Event("submit", { cancelable: true }));
+    }
+  }
+
+  function scheduleSelectionContextUpdate() {
+    if (selectionUpdateFrame !== null) {
+      window.cancelAnimationFrame(selectionUpdateFrame);
+    }
+    selectionUpdateFrame = window.requestAnimationFrame(() => {
+      selectionUpdateFrame = null;
+      updateSelectionContext();
+    });
   }
 
   // Render one message row. Citations are intentionally NOT shown to end
@@ -359,6 +429,7 @@
 
   function renderWidget() {
     const container = document.createElement("div");
+    widgetContainer = container;
     container.id = "oceanrag-widget-root";
     container.setAttribute("data-oceanrag-theme", widgetTheme);
     container.setAttribute("data-launcher-position", launcherPosition);
@@ -388,6 +459,11 @@
 
         <div id="oceanrag-starters" class="oceanrag-starters" role="group" aria-label="Suggested questions"></div>
 
+        <button id="oceanrag-selection-context" class="oceanrag-selection-context oceanrag-hidden" type="button" aria-label="Send selected text to the assistant">
+          <span class="oceanrag-selection-quote" aria-hidden="true">&ldquo;</span>
+          <span id="oceanrag-selection-text" class="oceanrag-selection-text"></span>
+        </button>
+
         <form id="oceanrag-input-form" class="oceanrag-input-form">
           <input type="text" id="oceanrag-text-input" placeholder="Type your message..." required aria-label="Type your message" autocomplete="off" data-testid="widget-chat-input" />
           <button type="submit" id="oceanrag-send-btn" class="oceanrag-send-btn" aria-label="Send message" data-testid="widget-chat-submit">
@@ -395,6 +471,14 @@
           </button>
         </form>
       </div>
+
+      <button id="oceanrag-selection-bubble" class="oceanrag-selection-bubble oceanrag-hidden" type="button" aria-label="Send selected text to the assistant">
+        <span class="oceanrag-selection-quote" aria-hidden="true">&ldquo;</span>
+        <span id="oceanrag-selection-bubble-text" class="oceanrag-selection-bubble-text"></span>
+        <span class="oceanrag-selection-send" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        </span>
+      </button>
     `;
 
     launcher = document.getElementById("oceanrag-launcher");
@@ -408,6 +492,16 @@
     titleEl = document.getElementById("oceanrag-title");
     unreadBadge = document.getElementById("oceanrag-unread-badge");
     starterPromptsBox = document.getElementById("oceanrag-starters");
+    selectionBubble = document.getElementById("oceanrag-selection-bubble");
+    selectionBubbleText = document.getElementById("oceanrag-selection-bubble-text");
+    selectionContextBox = document.getElementById("oceanrag-selection-context");
+    selectionContextText = document.getElementById("oceanrag-selection-text");
+    [selectionBubble, selectionContextBox].forEach((button) => {
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      button.addEventListener("click", sendSelectedText);
+    });
 
     // Launcher toggles the panel; the icon morphs between chat and close.
     launcher.addEventListener("click", () => {
@@ -424,12 +518,29 @@
     document.addEventListener(
       "pointerdown",
       (event) => {
-        if (isChatboxOpen() && !container.contains(event.target)) {
-          closeChatbox();
+        if (!container.contains(event.target)) {
+          outsidePointerStart = { x: event.clientX, y: event.clientY };
+        } else {
+          outsidePointerStart = null;
         }
       },
       true,
     );
+    document.addEventListener("selectionchange", scheduleSelectionContextUpdate);
+    document.addEventListener("pointerup", (event) => {
+      if (outsidePointerStart) {
+        const moved = Math.abs(event.clientX - outsidePointerStart.x) > 4
+          || Math.abs(event.clientY - outsidePointerStart.y) > 4;
+        const hasSelection = Boolean(window.getSelection()?.toString().trim());
+        outsidePointerStart = null;
+        if (!moved || !hasSelection) {
+          clearSelectionContext();
+          if (isChatboxOpen()) closeChatbox();
+        }
+      }
+      scheduleSelectionContextUpdate();
+    });
+    document.addEventListener("keyup", scheduleSelectionContextUpdate);
 
     closeBtn.addEventListener("click", () => {
       closeChatbox();
@@ -448,6 +559,7 @@
     });
 
     form.addEventListener("submit", handleQuerySubmit);
+    scheduleSelectionContextUpdate();
   }
 
   // Render the admin-configured starter prompt chips. Clicking a chip fills
@@ -470,16 +582,6 @@
     starterPromptsBox.innerHTML = "";
     starterPromptsBox.style.display = "";
 
-    const heading = document.createElement("div");
-    heading.className = "oceanrag-starters-heading";
-    const title = document.createElement("strong");
-    title.textContent = "Try asking";
-    const hint = document.createElement("span");
-    hint.textContent = "Select a question to send";
-    heading.append(title, hint);
-
-    const promptList = document.createElement("div");
-    promptList.className = "oceanrag-starter-list";
     prompts.forEach((prompt) => {
       const chip = document.createElement("button");
       chip.type = "button";
@@ -497,18 +599,30 @@
           handleQuerySubmit(new Event("submit", { cancelable: true }));
         }
       });
-      promptList.appendChild(chip);
+      starterPromptsBox.appendChild(chip);
     });
-    starterPromptsBox.append(heading, promptList);
   }
 
   // Handle queries
   async function handleQuerySubmit(e) {
     e.preventDefault();
-    const query = textInput.value.trim();
+    const typedQuery = textInput.value.trim();
+    const hadSelectedText = Boolean(selectedPageText);
+    const query = typedQuery
+      ? selectedPageText
+        ? `${typedQuery}\n\nSelected page text:\n${selectedPageText}`
+        : typedQuery
+      : selectedPageText
+        ? `Explain this: ${selectedPageText}`
+        : "";
     if (!query) return;
 
     hideStarterPrompts();
+    selectedPageText = "";
+    if (hadSelectedText) {
+      window.getSelection()?.removeAllRanges();
+    }
+    renderSelectionContext();
     addMessage(query, "user");
     textInput.value = "";
     const previousConversationId = conversationId;
@@ -697,6 +811,8 @@
     if (sendButton) sendButton.disabled = false;
     if (contactBtn) contactBtn.disabled = !conversationId;
     messagesBox.scrollTop = messagesBox.scrollHeight;
+    renderSelectionContext();
+    scheduleSelectionContextUpdate();
   }
 
   loadWidgetSettings();

@@ -416,53 +416,22 @@
 /* ---------- Starter prompt chips ---------- */
 .oceanrag-starters {
   display: flex;
-  flex: 0 1 auto;
-  flex-direction: column;
-  gap: 10px;
-  max-height: min(220px, 42%);
-  min-height: 0;
-  overflow: hidden;
-  margin: 0 12px 8px;
-  padding: 12px;
-  border: 1px solid var(--oceanrag-panel-border);
-  border-radius: 14px;
-  background-color: var(--oceanrag-footer-bg);
-  box-shadow: 0 8px 24px rgba(2, 8, 23, 0.12);
-}
-.oceanrag-starters-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 8px;
-  color: var(--oceanrag-body-text);
-  font-size: 12px;
-}
-.oceanrag-starters-heading span {
-  color: var(--oceanrag-muted-text);
-  font-size: 10px;
-}
-.oceanrag-starter-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
-  max-height: 148px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 2px 3px 4px 2px;
+  padding: 10px 14px 0;
 }
 .oceanrag-starter-chip {
   appearance: none;
-  width: 100%;
-  min-height: 40px;
-  border: 1px solid var(--oceanrag-panel-border);
-  background-color: var(--oceanrag-panel-bg);
+  max-width: 100%;
+  border: 1px solid var(--oceanrag-accent);
+  background-color: transparent;
   color: var(--oceanrag-body-text);
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 12px;
+  border-radius: 9999px;
+  padding: 6px 12px;
+  font-size: 11.5px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.2;
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -486,6 +455,114 @@
 .oceanrag-starter-chip:focus-visible {
   outline: 3px solid var(--oceanrag-accent);
   outline-offset: 2px;
+}
+
+/* Selected text appears over the launcher until the visitor sends it. */
+.oceanrag-selection-bubble {
+  appearance: none;
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 120px;
+  padding: 12px 14px;
+  border: 1px solid var(--oceanrag-panel-border);
+  border-radius: 16px;
+  background-color: var(--oceanrag-panel-bg);
+  color: var(--oceanrag-body-text);
+  box-shadow: var(--oceanrag-panel-shadow);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  animation: oceanrag-msg-in 0.18s ease both;
+}
+.oceanrag-selection-bubble.oceanrag-hidden {
+  display: none;
+}
+.oceanrag-selection-bubble:hover {
+  border-color: var(--oceanrag-accent);
+}
+.oceanrag-selection-bubble:focus-visible,
+.oceanrag-selection-context:focus-visible {
+  outline: 3px solid var(--oceanrag-accent);
+  outline-offset: 3px;
+}
+.oceanrag-selection-bubble-text {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.oceanrag-selection-send {
+  display: flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  background-color: var(--oceanrag-accent);
+  color: var(--oceanrag-accent-contrast);
+}
+#oceanrag-widget-root[data-launcher-position="left"] .oceanrag-selection-bubble {
+  right: auto;
+  left: 24px;
+}
+
+/* With chat open, the selected text is an actionable quote above the input. */
+.oceanrag-selection-context {
+  appearance: none;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 12px;
+  width: calc(100% - 28px);
+  margin: 0 14px 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--oceanrag-panel-border);
+  border-radius: 12px 12px 4px 4px;
+  background-color: var(--oceanrag-bot-bubble-bg);
+  color: var(--oceanrag-body-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.oceanrag-selection-context.oceanrag-hidden {
+  display: none;
+}
+.oceanrag-selection-context:hover {
+  border-color: var(--oceanrag-accent);
+}
+.oceanrag-selection-quote {
+  flex: 0 0 auto;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+}
+.oceanrag-selection-context:focus-visible {
+  outline: 3px solid var(--oceanrag-accent);
+  outline-offset: 3px;
+}
+.oceanrag-selection-text {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  max-height: 84px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 /* ---------- Input form ---------- */
@@ -638,14 +715,21 @@
     padding: 14px;
   }
 
-  .oceanrag-starters {
-    max-height: min(190px, 26dvh);
-    margin: 0 10px 6px;
-    padding: 10px;
+  .oceanrag-selection-context {
+    margin: 0 10px;
+    padding: 10px 12px;
+    width: calc(100% - 20px);
   }
 
-  .oceanrag-starter-list {
-    max-height: min(138px, 18dvh);
+  .oceanrag-selection-bubble {
+    right: 16px;
+    bottom: 76px;
+    width: calc(100vw - 32px);
+  }
+
+  #oceanrag-widget-root[data-launcher-position="left"] .oceanrag-selection-bubble {
+    left: 16px;
+    right: auto;
   }
 
   .oceanrag-msg-row {

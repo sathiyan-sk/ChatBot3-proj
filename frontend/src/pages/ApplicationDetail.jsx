@@ -2055,7 +2055,7 @@ export default function ApplicationDetail() {
                       {starterPrompts.map((prompt, i) => (
                         <span
                           key={i}
-                          className="rounded-full px-2.5 py-1 text-[9px] border truncate max-w-[160px]"
+                          className="rounded-full px-2.5 py-1 text-[9px] border max-w-full whitespace-normal break-words"
                           style={{
                             backgroundColor: pv.botBubbleBg,
                             borderColor: accentColor,
