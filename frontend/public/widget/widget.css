@@ -144,6 +144,34 @@
      icon) never covers the input / send controls when they intersect. */
   z-index: 1000000;
 }
+
+#oceanrag-widget-root[data-launcher-position="left"] .oceanrag-launcher {
+  left: 24px;
+  right: auto;
+}
+#oceanrag-widget-root[data-launcher-position="left"] .oceanrag-unread-badge {
+  left: -4px;
+  right: auto;
+}
+
+@media (min-width: 481px) {
+  #oceanrag-widget-root[data-launcher-position="left"] .oceanrag-chatbox {
+    left: 24px;
+    right: auto;
+    transform-origin: bottom left;
+  }
+
+  #oceanrag-widget-root[data-panel-size="compact"] .oceanrag-chatbox {
+    width: 320px;
+    height: min(480px, calc(100vh - 130px));
+  }
+
+  #oceanrag-widget-root[data-panel-size="wide"] .oceanrag-chatbox {
+    width: 420px;
+    height: min(640px, calc(100vh - 130px));
+  }
+}
+
 .oceanrag-hidden {
   opacity: 0;
   transform: scale(0.92) translateY(24px);
@@ -532,6 +560,11 @@
     /* 44px minimum touch target */
     height: 52px;
     width: 52px;
+  }
+
+  #oceanrag-widget-root[data-launcher-position="left"] .oceanrag-launcher {
+    left: 16px;
+    right: auto;
   }
 
   /* On mobile the panel is a full-screen sheet, so hide the floating

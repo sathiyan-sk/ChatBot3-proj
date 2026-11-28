@@ -15,6 +15,8 @@ def map_widget_model_to_entity(
         display_name=model.display_name,
         public_key=model.public_key,
         theme=model.theme,
+        launcher_position=model.launcher_position,
+        panel_size=model.panel_size,
         launcher_label=model.launcher_label,
         welcome_message=model.welcome_message,
         placeholder_text=model.placeholder_text,

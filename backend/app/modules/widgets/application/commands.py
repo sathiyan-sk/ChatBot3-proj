@@ -9,6 +9,8 @@ class CreateWidgetCommand:
     application_id: UUID
     display_name: str
     theme: str
+    launcher_position: str
+    panel_size: str
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
@@ -22,6 +24,8 @@ class UpdateWidgetCommand:
     widget_id: UUID
     display_name: str
     theme: str
+    launcher_position: str
+    panel_size: str
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None

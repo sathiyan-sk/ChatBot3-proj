@@ -32,13 +32,29 @@ export function normalizeHex(input) {
   return `#${hex.toUpperCase()}`;
 }
 
-/** Pick black/white text for best contrast against a hex background. */
-export function readableTextOn(hex) {
+function relativeLuminance(hex) {
   const safe = normalizeHex(hex) || "#000000";
   const r = parseInt(safe.slice(1, 3), 16) / 255;
   const g = parseInt(safe.slice(3, 5), 16) / 255;
   const b = parseInt(safe.slice(5, 7), 16) / 255;
   const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  return L > 0.55 ? "#040914" : "#FFFFFF";
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+export function contrastRatio(foreground, background) {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** Pick the darker or lighter text colour with the better WCAG contrast. */
+export function readableTextOn(hex) {
+  const safe = normalizeHex(hex) || "#000000";
+  const darkText = "#040914";
+  const lightText = "#FFFFFF";
+  return contrastRatio(darkText, safe) >= contrastRatio(lightText, safe)
+    ? darkText
+    : lightText;
 }

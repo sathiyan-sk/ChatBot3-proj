@@ -20,7 +20,11 @@ import { Tabs } from "@/components/ui/Tabs";
 import { Field, Input, Textarea, Select, CheckboxRow, InsetWell } from "@/components/ui/Form";
 import { ColorPicker } from "@/components/ui/ColorPicker";
 import { StarterPrompts } from "@/components/ui/StarterPrompts";
-import { DEFAULT_WIDGET_ACCENT, readableTextOn } from "@/components/ui/colorUtils";
+import {
+  contrastRatio,
+  DEFAULT_WIDGET_ACCENT,
+  readableTextOn,
+} from "@/components/ui/colorUtils";
 
 // Default starter prompts shown in the widget until the admin customises them.
 const DEFAULT_STARTER_PROMPTS = [
@@ -28,6 +32,12 @@ const DEFAULT_STARTER_PROMPTS = [
   "Reset my API key",
   "What is your refund policy?",
 ];
+const DEFAULT_WIDGET_GREETING = "Hello! Ask me any questions about our policies.";
+const WIDGET_PANEL_SIZES = {
+  compact: { width: 320, height: 480 },
+  standard: { width: 360, height: 560 },
+  wide: { width: 420, height: 640 },
+};
 
 /* ============================================================
    APPLICATION DETAIL
@@ -240,6 +250,8 @@ export default function ApplicationDetail() {
   // Theme is stored as the semantic value (light/dark) that the
   // backend persists - NOT a hex color. The preview maps theme -> color.
   const [widgetTheme, setWidgetTheme] = useState("light");
+  const [widgetPosition, setWidgetPosition] = useState("right");
+  const [widgetPanelSize, setWidgetPanelSize] = useState("standard");
   const [launcherLabel, setLauncherLabel] = useState("Chat with us");
   const [placeholderText, setPlaceholderText] = useState("Type your message...");
   const [isWidgetEnabled, setIsWidgetEnabled] = useState(true);
@@ -335,14 +347,24 @@ export default function ApplicationDetail() {
           setWidgetCfg(widgetRes.data);
           setGreetingMsg(widgetRes.data.welcome_message || "");
           setWidgetTheme(widgetRes.data.theme === "dark" ? "dark" : "light");
-          setLauncherLabel(widgetRes.data.launcher_label || "Chat with us");
+          setWidgetPosition(widgetRes.data.launcher_position === "left" ? "left" : "right");
+          setWidgetPanelSize(
+            WIDGET_PANEL_SIZES[widgetRes.data.panel_size]
+              ? widgetRes.data.panel_size
+              : "standard"
+          );
+          setLauncherLabel(
+            widgetRes.data.launcher_label || widgetRes.data.display_name || "Chat with us"
+          );
           setPlaceholderText(widgetRes.data.placeholder_text || "Type your message...");
           setIsWidgetEnabled(widgetRes.data.is_enabled);
           setWidgetAccent(widgetRes.data.accent_color || DEFAULT_WIDGET_ACCENT);
           // Backend-persisted starter prompt chips.
-          if (Array.isArray(widgetRes.data.starter_prompts)) {
-            setStarterPrompts(widgetRes.data.starter_prompts);
-          }
+          setStarterPrompts(
+            Array.isArray(widgetRes.data.starter_prompts)
+              ? widgetRes.data.starter_prompts
+              : DEFAULT_STARTER_PROMPTS
+          );
         } catch (error) {
           if (error.response?.status !== 404) {
             console.warn("Failed to load widget configuration for this application", error);
@@ -350,9 +372,13 @@ export default function ApplicationDetail() {
           setWidgetCfg(null);
           setGreetingMsg("");
           setWidgetTheme("light");
+          setWidgetPosition("right");
+          setWidgetPanelSize("standard");
           setLauncherLabel("Chat with us");
           setPlaceholderText("Type your message...");
           setIsWidgetEnabled(true);
+          setWidgetAccent(DEFAULT_WIDGET_ACCENT);
+          setStarterPrompts(DEFAULT_STARTER_PROMPTS);
         }
 
         // Fetch settings
@@ -546,6 +572,8 @@ export default function ApplicationDetail() {
         await apiClient.put(`/admin/widgets/${widgetCfg.id}`, {
           display_name: widgetCfg.display_name,
           theme: widgetTheme,
+          launcher_position: widgetPosition,
+          panel_size: widgetPanelSize,
           launcher_label: launcherLabel,
           welcome_message: greetingMsg,
           placeholder_text: placeholderText,
@@ -560,6 +588,8 @@ export default function ApplicationDetail() {
             application_id: id,
             display_name: app?.name || "Support Widget",
             theme: widgetTheme,
+            launcher_position: widgetPosition,
+            panel_size: widgetPanelSize,
             launcher_label: launcherLabel,
             welcome_message: greetingMsg,
             placeholder_text: placeholderText,
@@ -573,6 +603,8 @@ export default function ApplicationDetail() {
             await apiClient.put(`/admin/widgets/${existing.data.id}`, {
               display_name: existing.data.display_name || app?.name || "Support Widget",
               theme: widgetTheme,
+              launcher_position: widgetPosition,
+              panel_size: widgetPanelSize,
               launcher_label: launcherLabel,
               welcome_message: greetingMsg,
               placeholder_text: placeholderText,
@@ -990,6 +1022,9 @@ export default function ApplicationDetail() {
   // the header background in light theme (matching the real widget.css).
   const accentColor = widgetAccent || pv.accent;
   const accentContrast = readableTextOn(accentColor);
+  const accentContrastRatio = contrastRatio(accentContrast, accentColor);
+  const panelPreviewSize =
+    WIDGET_PANEL_SIZES[widgetPanelSize] || WIDGET_PANEL_SIZES.standard;
   const previewColor = widgetTheme === "dark" ? pv.headerBg : accentColor;
   const previewHeaderTextColor = widgetTheme === "dark" ? pv.headerText : accentContrast;
 
@@ -1004,7 +1039,7 @@ export default function ApplicationDetail() {
     backendUrl: "${BACKEND_URL}"
   };
 </script>
-<script src="${FRONTEND_URL}/widget/widget.js?v=4" async></script>`
+<script src="${FRONTEND_URL}/widget/widget.js?v=6" async></script>`
     : "";
 
   const copyToClipboard = (text, type) => {
@@ -1758,12 +1793,17 @@ export default function ApplicationDetail() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Greeting Prompt" htmlFor="widget-greeting">
-                      <Input
+                    <Field
+                      label="Greeting Message"
+                      htmlFor="widget-greeting"
+                      hint="Shown as the first assistant message. Up to 1,000 characters."
+                    >
+                      <Textarea
                         id="widget-greeting"
-                        type="text"
                         value={greetingMsg}
                         onChange={(e) => setGreetingMsg(e.target.value)}
+                        maxLength={1000}
+                        rows={3}
                         data-testid="widget-greeting-input"
                       />
                     </Field>
@@ -1778,10 +1818,45 @@ export default function ApplicationDetail() {
                         <option value="dark">Dark</option>
                       </Select>
                     </Field>
+                    <Field
+                      label="Launcher Position"
+                      htmlFor="widget-position"
+                      hint="Choose which lower corner holds the launcher."
+                    >
+                      <Select
+                        id="widget-position"
+                        value={widgetPosition}
+                        onChange={(event) => setWidgetPosition(event.target.value)}
+                        data-testid="widget-position"
+                      >
+                        <option value="right">Bottom right</option>
+                        <option value="left">Bottom left</option>
+                      </Select>
+                    </Field>
+                    <Field
+                      label="Panel Size"
+                      htmlFor="widget-panel-size"
+                      hint="Desktop preset; mobile uses a full-screen panel."
+                    >
+                      <Select
+                        id="widget-panel-size"
+                        value={widgetPanelSize}
+                        onChange={(event) => setWidgetPanelSize(event.target.value)}
+                        data-testid="widget-panel-size"
+                      >
+                        <option value="compact">Compact (320 × 480)</option>
+                        <option value="standard">Standard (360 × 560)</option>
+                        <option value="wide">Wide (420 × 640)</option>
+                      </Select>
+                    </Field>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Launcher Label" htmlFor="widget-launcher">
+                    <Field
+                      label="Chat Header Title"
+                      htmlFor="widget-launcher"
+                      hint="Shown in the chat panel header and announced by the launcher."
+                    >
                       <Input
                         id="widget-launcher"
                         type="text"
@@ -1818,6 +1893,15 @@ export default function ApplicationDetail() {
                       Applied to the launcher and send button (and the header in light theme).
                       Choose a preset or pick a custom colour.
                     </p>
+                    {accentContrastRatio < 4.5 && (
+                      <p
+                        className="text-[10px] text-amber-300 mt-2 leading-relaxed"
+                        role="status"
+                      >
+                        Text contrast is {accentContrastRatio.toFixed(2)}:1. Choose a color
+                        with at least 4.5:1 contrast for readable text.
+                      </p>
+                    )}
                   </div>
 
                   {/* Starter prompts & FAQs */}
@@ -1854,7 +1938,7 @@ export default function ApplicationDetail() {
                       className="uppercase tracking-wider"
                       data-testid="widget-save-btn"
                     >
-                      Save Appearance Contract
+                      Save Widget Appearance
                     </Button>
                   </div>
                 </Card>
@@ -1925,25 +2009,34 @@ export default function ApplicationDetail() {
 
               {/* Chat panel - mirrors the real widget theme tokens */}
               <div
-                className="rounded-card overflow-hidden shadow-inner h-72 flex flex-col border"
-                style={{ backgroundColor: pv.panelBg, borderColor: pv.panelBorder }}
+                className="rounded-card overflow-hidden shadow-inner flex flex-col border transition-[width,height]"
+                style={{
+                  backgroundColor: pv.panelBg,
+                  borderColor: pv.panelBorder,
+                  width: `${panelPreviewSize.width}px`,
+                  maxWidth: "100%",
+                  height: `${panelPreviewSize.height}px`,
+                  marginLeft: widgetPosition === "left" ? 0 : "auto",
+                  marginRight: widgetPosition === "left" ? "auto" : 0,
+                }}
               >
                 <div
                   className="p-3 text-xs font-bold flex items-center justify-between"
                   style={{ backgroundColor: previewColor, color: previewHeaderTextColor }}
                 >
-                  <span className="tracking-tight truncate">{app.name}</span>
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="tracking-tight truncate">
+                    {launcherLabel || app?.name || "Chat Assistant"}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-current/30 px-2 py-1 text-[8px] font-semibold">
+                      Contact us
+                    </span>
+                    <span aria-hidden="true" className="text-sm leading-none">×</span>
+                  </div>
                 </div>
 
                 <div className="flex-1 p-4 space-y-3 overflow-y-auto">
                   <div className="flex gap-2">
-                    <div
-                      className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] flex-shrink-0"
-                      style={{ backgroundColor: pv.botBubbleBg, color: pv.bodyText }}
-                    >
-                      🤖
-                    </div>
                     <div
                       className="rounded-card px-3 py-2 text-[10px] leading-relaxed max-w-[80%] border"
                       style={{
@@ -1952,14 +2045,14 @@ export default function ApplicationDetail() {
                         color: pv.bodyText,
                       }}
                     >
-                      {greetingMsg || "Hello! Ask me anything."}
+                      {greetingMsg || DEFAULT_WIDGET_GREETING}
                     </div>
                   </div>
 
                   {/* Starter prompt chips (shown to help users begin) */}
                   {starterPrompts.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pl-8">
-                      {starterPrompts.slice(0, 4).map((prompt, i) => (
+                    <div className="flex flex-wrap gap-1.5">
+                      {starterPrompts.map((prompt, i) => (
                         <span
                           key={i}
                           className="rounded-full px-2.5 py-1 text-[9px] border truncate max-w-[160px]"
@@ -2001,7 +2094,13 @@ export default function ApplicationDetail() {
 
               {/* Launcher orb sits below the panel (mirrors the real widget),
                   so it never overlaps the input controls. */}
-              <div className="flex items-center justify-between gap-3 pt-1">
+              <div
+                className={`flex items-center gap-3 pt-1 ${
+                  widgetPosition === "left"
+                    ? "flex-row-reverse justify-end"
+                    : "justify-end"
+                }`}
+              >
                 <span className="text-[10px] text-slate-500">Launcher preview</span>
                 <div
                   className="h-11 w-11 rounded-full flex items-center justify-center text-lg shadow-xl border border-white/[0.10] flex-shrink-0"

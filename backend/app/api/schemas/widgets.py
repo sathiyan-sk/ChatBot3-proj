@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
+
+WidgetTheme = Literal["light", "dark"]
+WidgetLauncherPosition = Literal["left", "right"]
+WidgetPanelSize = Literal["compact", "standard", "wide"]
 
 
 class CreateWidgetRequest(BaseModel):
@@ -15,18 +20,16 @@ class CreateWidgetRequest(BaseModel):
         max_length=150,
     )
 
-    theme: str = Field(
-        default="light",
-        min_length=1,
-        max_length=50,
-    )
+    theme: WidgetTheme = "light"
+    launcher_position: WidgetLauncherPosition = "right"
+    panel_size: WidgetPanelSize = "standard"
 
     launcher_label: str | None = Field(
         default=None,
         max_length=100,
     )
 
-    welcome_message: str | None = None
+    welcome_message: str | None = Field(default=None, max_length=1000)
 
     placeholder_text: str | None = Field(
         default=None,
@@ -83,18 +86,16 @@ class UpdateWidgetRequest(BaseModel):
         max_length=150,
     )
 
-    theme: str = Field(
-        default="light",
-        min_length=1,
-        max_length=50,
-    )
+    theme: WidgetTheme = "light"
+    launcher_position: WidgetLauncherPosition = "right"
+    panel_size: WidgetPanelSize = "standard"
 
     launcher_label: str | None = Field(
         default=None,
         max_length=100,
     )
 
-    welcome_message: str | None = None
+    welcome_message: str | None = Field(default=None, max_length=1000)
 
     placeholder_text: str | None = Field(
         default=None,
@@ -133,6 +134,8 @@ class WidgetResponse(BaseModel):
     display_name: str
     public_key: str | None
     theme: str
+    launcher_position: WidgetLauncherPosition = "right"
+    panel_size: WidgetPanelSize = "standard"
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
@@ -150,6 +153,8 @@ class WidgetResponse(BaseModel):
 class PublicWidgetConfigurationResponse(BaseModel):
     display_name: str
     theme: str
+    launcher_position: WidgetLauncherPosition = "right"
+    panel_size: WidgetPanelSize = "standard"
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None

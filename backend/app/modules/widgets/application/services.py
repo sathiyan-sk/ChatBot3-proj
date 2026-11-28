@@ -54,6 +54,8 @@ class WidgetApplicationService:
             ),
             public_key=public_key,
             theme=command.theme.strip().lower(),
+            launcher_position=command.launcher_position,
+            panel_size=command.panel_size,
             launcher_label=self._clean_optional(
                 command.launcher_label,
             ),
@@ -103,6 +105,8 @@ class WidgetApplicationService:
         return {
             "display_name": widget.display_name,
             "theme": widget.theme,
+            "launcher_position": widget.launcher_position,
+            "panel_size": widget.panel_size,
             "launcher_label": widget.launcher_label,
             "welcome_message": widget.welcome_message,
             "placeholder_text": widget.placeholder_text,
@@ -172,6 +176,8 @@ class WidgetApplicationService:
                 command.display_name.strip()
             ),
             theme=command.theme.strip().lower(),
+            launcher_position=command.launcher_position,
+            panel_size=command.panel_size,
             launcher_label=self._clean_optional(
                 command.launcher_label,
             ),
@@ -245,6 +251,8 @@ class WidgetApplicationService:
             display_name=widget.display_name,
             public_key=widget.public_key,
             theme=widget.theme,
+            launcher_position=widget.launcher_position,
+            panel_size=widget.panel_size,
             launcher_label=widget.launcher_label,
             welcome_message=widget.welcome_message,
             placeholder_text=widget.placeholder_text,

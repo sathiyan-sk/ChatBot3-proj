@@ -36,6 +36,8 @@ class SqlAlchemyWidgetRepository(
         display_name: str,
         public_key: str,
         theme: str,
+        launcher_position: str,
+        panel_size: str,
         launcher_label: str | None,
         welcome_message: str | None,
         placeholder_text: str | None,
@@ -50,6 +52,8 @@ class SqlAlchemyWidgetRepository(
             display_name=display_name,
             public_key=public_key,
             theme=theme,
+            launcher_position=launcher_position,
+            panel_size=panel_size,
             launcher_label=launcher_label,
             welcome_message=welcome_message,
             placeholder_text=placeholder_text,
@@ -128,6 +132,8 @@ class SqlAlchemyWidgetRepository(
         widget_id: UUID | str,
         display_name: str,
         theme: str,
+        launcher_position: str,
+        panel_size: str,
         launcher_label: str | None,
         welcome_message: str | None,
         placeholder_text: str | None,
@@ -150,6 +156,8 @@ class SqlAlchemyWidgetRepository(
 
         model.display_name = display_name
         model.theme = theme
+        model.launcher_position = launcher_position
+        model.panel_size = panel_size
         model.launcher_label = launcher_label
         model.welcome_message = welcome_message
         model.placeholder_text = placeholder_text

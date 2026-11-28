@@ -5,6 +5,7 @@ from uuid import UUID as PyUUID
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Index,
     String,
@@ -32,6 +33,14 @@ class WidgetModel(
     __tablename__ = "widgets"
 
     __table_args__ = (
+        CheckConstraint(
+            "launcher_position IN ('left', 'right')",
+            name="launcher_position",
+        ),
+        CheckConstraint(
+            "panel_size IN ('compact', 'standard', 'wide')",
+            name="panel_size",
+        ),
         Index(
             "ix_widgets_application_id",
             "application_id",
@@ -71,6 +80,20 @@ class WidgetModel(
         nullable=False,
         default="light",
         server_default="light",
+    )
+
+    launcher_position: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="right",
+        server_default="right",
+    )
+
+    panel_size: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="standard",
+        server_default="standard",
     )
 
     launcher_label: Mapped[str | None] = (

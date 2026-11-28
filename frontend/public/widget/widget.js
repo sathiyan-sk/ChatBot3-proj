@@ -40,7 +40,10 @@
 
   // Widget state
   let widgetTheme = "light";
-  let greetingMessage = "Hello! Ask me any questions about our policies.";
+  let launcherPosition = "right";
+  let panelSize = "standard";
+  const defaultGreetingMessage = "Hello! Ask me any questions about our policies.";
+  let greetingMessage = defaultGreetingMessage;
   let placeholderText = "Type your message...";
   let headerTitle = "Chat Assistant";
   let accentColor = null;
@@ -63,19 +66,25 @@
   let unreadBadge = null;
   let starterPromptsBox = null;
 
-  // Return the best-contrast text colour (dark or light) for a hex background.
-  function readableTextOn(hex) {
+  function relativeLuminance(hex) {
     const safe = String(hex || "").trim().replace(/^#/, "");
     const expanded = safe.length === 3
       ? safe.split("").map((c) => c + c).join("")
       : safe;
-    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return "#040914";
+    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return 0;
     const r = parseInt(expanded.slice(0, 2), 16) / 255;
     const g = parseInt(expanded.slice(2, 4), 16) / 255;
     const b = parseInt(expanded.slice(4, 6), 16) / 255;
     const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-    const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-    return luminance > 0.55 ? "#040914" : "#FFFFFF";
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+
+  // Return the dark or light text colour with the better WCAG contrast.
+  function readableTextOn(hex) {
+    const luminance = relativeLuminance(hex);
+    const darkContrast = (luminance + 0.05) / (relativeLuminance("#040914") + 0.05);
+    const lightContrast = 1.05 / (luminance + 0.05);
+    return darkContrast >= lightContrast ? "#040914" : "#FFFFFF";
   }
 
   // Apply the admin's custom accent colour by overriding the theme CSS
@@ -352,11 +361,13 @@
     const container = document.createElement("div");
     container.id = "oceanrag-widget-root";
     container.setAttribute("data-oceanrag-theme", widgetTheme);
+    container.setAttribute("data-launcher-position", launcherPosition);
+    container.setAttribute("data-panel-size", panelSize);
     document.body.appendChild(container);
 
     container.innerHTML = `
       <!-- Floating Circular Launcher -->
-      <button id="oceanrag-launcher" class="oceanrag-launcher" title="Chat with Assistant" aria-label="Open chat" aria-haspopup="dialog" aria-expanded="false" data-testid="widget-launcher-btn">
+      <button id="oceanrag-launcher" class="oceanrag-launcher" title="Open chat" aria-label="Open chat" aria-haspopup="dialog" aria-expanded="false" data-testid="widget-launcher-btn">
         <svg class="oceanrag-icon-chat" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
         <svg class="oceanrag-icon-close" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         <span id="oceanrag-unread-badge" class="oceanrag-unread-badge oceanrag-hidden" aria-hidden="true"></span>
@@ -584,6 +595,10 @@
         }
 
         widgetTheme = data.theme === "dark" ? "dark" : "light";
+        launcherPosition = data.launcher_position === "left" ? "left" : "right";
+        panelSize = ["compact", "standard", "wide"].includes(data.panel_size)
+          ? data.panel_size
+          : "standard";
         greetingMessage = data.welcome_message || greetingMessage;
         placeholderText = data.placeholder_text || placeholderText;
         // Launcher label wins; fall back to the application display name.
@@ -605,6 +620,8 @@
     applyAccentColor();
 
     titleEl.textContent = headerTitle;
+    launcher.title = `Open ${headerTitle}`;
+    launcher.setAttribute("aria-label", `Open chat with ${headerTitle}`);
     textInput.placeholder = placeholderText;
 
     // Restore retained visitor history or create the visitor's first conversation.

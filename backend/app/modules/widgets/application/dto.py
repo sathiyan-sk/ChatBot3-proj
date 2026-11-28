@@ -12,6 +12,8 @@ class WidgetDto:
     display_name: str
     public_key: str | None
     theme: str
+    launcher_position: str
+    panel_size: str
     launcher_label: str | None
     welcome_message: str | None
     placeholder_text: str | None
