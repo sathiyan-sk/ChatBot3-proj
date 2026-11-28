@@ -417,6 +417,19 @@
         openChatbox();
       }
     });
+    if (window.matchMedia?.("(hover: hover) and (pointer: fine)").matches) {
+      launcher.addEventListener("pointerenter", openChatbox);
+    }
+
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (isChatboxOpen() && !container.contains(event.target)) {
+          closeChatbox();
+        }
+      },
+      true,
+    );
 
     closeBtn.addEventListener("click", () => {
       closeChatbox();
@@ -456,11 +469,23 @@
     }
     starterPromptsBox.innerHTML = "";
     starterPromptsBox.style.display = "";
+
+    const heading = document.createElement("div");
+    heading.className = "oceanrag-starters-heading";
+    const title = document.createElement("strong");
+    title.textContent = "Try asking";
+    const hint = document.createElement("span");
+    hint.textContent = "Select a question to send";
+    heading.append(title, hint);
+
+    const promptList = document.createElement("div");
+    promptList.className = "oceanrag-starter-list";
     prompts.forEach((prompt) => {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "oceanrag-starter-chip";
       chip.textContent = prompt;
+      chip.setAttribute("aria-label", `Send suggested question: ${prompt}`);
       chip.setAttribute("data-testid", "widget-starter-chip");
       chip.addEventListener("click", () => {
         if (!textInput || textInput.disabled) return;
@@ -472,8 +497,9 @@
           handleQuerySubmit(new Event("submit", { cancelable: true }));
         }
       });
-      starterPromptsBox.appendChild(chip);
+      promptList.appendChild(chip);
     });
+    starterPromptsBox.append(heading, promptList);
   }
 
   // Handle queries
